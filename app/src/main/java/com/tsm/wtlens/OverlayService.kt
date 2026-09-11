@@ -6,17 +6,20 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,31 +57,60 @@ class OverlayService : Service() {
     }
 
     private fun handleStart(intent: Intent) {
-        // Must call startForeground before touching MediaProjection APIs.
-        startForeground(NOTIF_ID, buildNotification())
+        Log.d(TAG, "handleStart")
+        try {
+            // Must call startForeground (with the mediaProjection type, on
+            // API 29+) before touching any MediaProjection APIs.
+            ServiceCompat.startForeground(
+                this,
+                NOTIF_ID,
+                buildNotification(),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    0
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed", e)
+            stopSelf()
+            return
+        }
 
         if (mediaProjection == null) {
             val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
             @Suppress("DEPRECATION")
             val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
             if (resultCode == -1 || resultData == null) {
+                Log.e(TAG, "Missing MediaProjection result data, stopping")
                 stopSelf()
                 return
             }
-            val projectionManager =
-                getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val projection = projectionManager.getMediaProjection(resultCode, resultData)
-            projection.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    stopSelf()
-                }
-            }, null)
-            mediaProjection = projection
-            screenCapture = ScreenCapture(projection)
+            try {
+                val projectionManager =
+                    getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                val projection = projectionManager.getMediaProjection(resultCode, resultData)
+                projection.registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        stopSelf()
+                    }
+                }, null)
+                mediaProjection = projection
+                screenCapture = ScreenCapture(projection)
+            } catch (e: Exception) {
+                Log.e(TAG, "getMediaProjection failed", e)
+                stopSelf()
+                return
+            }
         }
 
         if (bubbleView == null) {
-            addBubble()
+            try {
+                addBubble()
+                Log.d(TAG, "Bubble added")
+            } catch (e: Exception) {
+                Log.e(TAG, "addBubble failed", e)
+            }
         }
 
         // Kick off the translation model download early so the first tap
@@ -249,5 +281,6 @@ class OverlayService : Service() {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         private const val NOTIF_ID = 42
+        private const val TAG = "WebtoonLens"
     }
 }
