@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
+import androidx.core.content.IntentCompat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -78,10 +79,16 @@ class OverlayService : Service() {
         }
 
         if (mediaProjection == null) {
-            val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-            @Suppress("DEPRECATION")
-            val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
-            if (resultCode == -1 || resultData == null) {
+            val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, MISSING_RESULT_CODE)
+            val resultData = IntentCompat.getParcelableExtra(
+                intent, EXTRA_RESULT_DATA, Intent::class.java
+            )
+            Log.d(
+                TAG,
+                "extras keys=${intent.extras?.keySet()?.joinToString()} " +
+                    "resultCode=$resultCode hasData=${resultData != null}"
+            )
+            if (resultCode == MISSING_RESULT_CODE || resultData == null) {
                 Log.e(TAG, "Missing MediaProjection result data, stopping")
                 stopSelf()
                 return
@@ -282,5 +289,6 @@ class OverlayService : Service() {
         const val EXTRA_RESULT_DATA = "result_data"
         private const val NOTIF_ID = 42
         private const val TAG = "WebtoonLens"
+        private const val MISSING_RESULT_CODE = Int.MIN_VALUE
     }
 }
