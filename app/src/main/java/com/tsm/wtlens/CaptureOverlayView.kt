@@ -5,18 +5,24 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Region
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.hypot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
  * Full-screen overlay showing a frozen screenshot with OCR'd Korean text
- * made tappable: tapping a single word looks that word up, tapping anywhere
- * else on its line/speech-bubble translates the whole line.
+ * made tappable in two ways:
+ *  - a quick tap on a single word translates just that word.
+ *  - dragging a circle/lasso around any area translates everything whose
+ *    OCR box falls inside it, in reading order (one word, a whole line, or
+ *    a multi-line span all work the same way).
  */
 class CaptureOverlayView(
     context: Context,
@@ -24,18 +30,23 @@ class CaptureOverlayView(
     private val words: List<OcrHit>,
     private val lines: List<OcrHit>,
     private val translationHelper: TranslationHelper,
+    private val dictionaryLookup: suspend (String) -> String?,
     private val scope: CoroutineScope,
     private val onCloseRequested: () -> Unit
 ) : View(context) {
 
     private data class Selection(
-        val hit: OcrHit,
+        val id: Int,
+        val text: String,
         val anchor: RectF,
         var translated: String?,
-        var loading: Boolean
+        var loading: Boolean,
+        var source: String? = null
     )
 
     private var selection: Selection? = null
+    private var selectedHits: List<OcrHit> = emptyList()
+    private var nextSelectionId = 0
 
     private val wordBoxPaint = Paint().apply {
         color = Color.argb(60, 255, 235, 59)
@@ -45,6 +56,23 @@ class CaptureOverlayView(
         color = Color.argb(90, 66, 133, 244)
         style = Paint.Style.STROKE
         strokeWidth = 3f
+    }
+    private val selectedFillPaint = Paint().apply {
+        color = Color.argb(110, 255, 87, 34)
+        style = Paint.Style.FILL
+    }
+    private val lassoStrokePaint = Paint().apply {
+        color = Color.argb(230, 255, 87, 34)
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        isAntiAlias = true
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val lassoFillPaint = Paint().apply {
+        color = Color.argb(50, 255, 87, 34)
+        style = Paint.Style.FILL
+        isAntiAlias = true
     }
     private val closeButtonBgPaint = Paint().apply {
         color = Color.argb(200, 30, 30, 30)
@@ -70,8 +98,20 @@ class CaptureOverlayView(
         textSize = 40f
         isAntiAlias = true
     }
+    private val popupSourcePaint = Paint().apply {
+        color = Color.argb(180, 130, 200, 255)
+        textSize = 24f
+        isAntiAlias = true
+    }
 
     private val closeButtonRect = RectF()
+
+    // --- Drag/lasso tracking --------------------------------------------
+    private var dragPath: Path? = null
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var dragMoved = false
+    private val minDragDistance = 24f
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -89,6 +129,14 @@ class CaptureOverlayView(
         for (word in words) {
             canvas.drawRect(word.bounds, wordBoxPaint)
         }
+        for (hit in selectedHits) {
+            canvas.drawRect(hit.bounds, selectedFillPaint)
+        }
+
+        dragPath?.let { path ->
+            canvas.drawPath(path, lassoFillPaint)
+            canvas.drawPath(path, lassoStrokePaint)
+        }
 
         canvas.drawRoundRect(closeButtonRect, 20f, 20f, closeButtonBgPaint)
         canvas.drawText(
@@ -104,14 +152,15 @@ class CaptureOverlayView(
     private fun drawPopup(canvas: Canvas, sel: Selection) {
         val paddingH = 32f
         val paddingV = 24f
-        val original = sel.hit.text
+        val original = sel.text
         val translated = if (sel.loading) "Translating…" else (sel.translated ?: "")
+        val sourceLabel = sel.source?.takeIf { !sel.loading }
 
         val originalWidth = popupOriginalPaint.measureText(original)
         val translatedWidth = popupTranslatedPaint.measureText(translated)
         val boxWidth = (maxOf(originalWidth, translatedWidth) + paddingH * 2)
             .coerceAtMost(width - 40f)
-        val boxHeight = 130f
+        val boxHeight = if (sourceLabel != null) 160f else 130f
 
         var left = sel.anchor.centerX() - boxWidth / 2
         left = left.coerceIn(20f, width - boxWidth - 20f)
@@ -123,16 +172,47 @@ class CaptureOverlayView(
         canvas.drawRoundRect(box, 24f, 24f, popupBgPaint)
         canvas.drawText(original, box.left + paddingH, box.top + paddingV + 30f, popupOriginalPaint)
         canvas.drawText(translated, box.left + paddingH, box.top + paddingV + 78f, popupTranslatedPaint)
+        if (sourceLabel != null) {
+            canvas.drawText(sourceLabel, box.left + paddingH, box.top + paddingV + 112f, popupSourcePaint)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action != MotionEvent.ACTION_UP) return true
-        val x = event.x
-        val y = event.y
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                dragStartX = event.x
+                dragStartY = event.y
+                dragMoved = false
+                dragPath = Path().apply { moveTo(event.x, event.y) }
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - dragStartX
+                val dy = event.y - dragStartY
+                if (hypot(dx, dy) > minDragDistance) dragMoved = true
+                dragPath?.lineTo(event.x, event.y)
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val path = dragPath
+                dragPath = null
+                if (dragMoved && path != null) {
+                    handleLassoComplete(path)
+                } else {
+                    handleTap(event.x, event.y)
+                }
+                invalidate()
+                return true
+            }
+        }
+        return true
+    }
 
+    private fun handleTap(x: Float, y: Float) {
         if (closeButtonRect.contains(x, y)) {
             onCloseRequested()
-            return true
+            return
         }
 
         val tappedWord = words.firstOrNull { rectContains(it.bounds, x, y) }
@@ -140,26 +220,75 @@ class CaptureOverlayView(
         val hit = tappedWord ?: tappedLine
 
         if (hit == null) {
-            if (selection != null) {
-                selection = null
-                invalidate()
-            }
-            return true
+            clearSelection()
+            return
         }
 
-        val anchor = RectF(hit.bounds)
-        selection = Selection(hit, anchor, translated = null, loading = true)
+        selectedHits = listOf(hit)
+        startTranslation(hit.text, RectF(hit.bounds))
+    }
+
+    private fun handleLassoComplete(path: Path) {
+        path.close()
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
+
+        val clip = Region(0, 0, width, height)
+        val region = Region().apply { setPath(path, clip) }
+
+        val enclosed = words.filter { hit ->
+            val cx = hit.bounds.centerX()
+            val cy = hit.bounds.centerY()
+            region.contains(cx, cy)
+        }
+
+        if (enclosed.isEmpty()) {
+            clearSelection()
+            return
+        }
+
+        // Reading order: top-to-bottom, then left-to-right within a line.
+        val sorted = enclosed.sortedWith(
+            compareBy({ (it.bounds.top / 20) }, { it.bounds.left })
+        )
+        val combinedText = sorted.joinToString(" ") { it.text }
+        val unionBounds = RectF(sorted.first().bounds)
+        for (hit in sorted.drop(1)) unionBounds.union(RectF(hit.bounds))
+
+        selectedHits = sorted
+        startTranslation(combinedText, unionBounds)
+    }
+
+    private fun startTranslation(text: String, anchor: RectF) {
+        val id = ++nextSelectionId
+        selection = Selection(id, text, anchor, translated = null, loading = true)
         invalidate()
 
         scope.launch {
-            val result = runCatching { translationHelper.translate(hit.text) }
-                .getOrElse { "(translation failed)" }
-            if (selection?.hit === hit) {
-                selection = selection?.copy(translated = result, loading = false)
+            val dictResult = runCatching { dictionaryLookup(text) }.getOrNull()
+            val result: String
+            val source: String
+            if (dictResult != null) {
+                result = dictResult
+                source = "Dictionary"
+            } else {
+                result = runCatching { translationHelper.translate(text) }
+                    .getOrElse { "(translation failed)" }
+                source = "Translation"
+            }
+            if (selection?.id == id) {
+                selection = selection?.copy(translated = result, loading = false, source = source)
                 invalidate()
             }
         }
-        return true
+    }
+
+    private fun clearSelection() {
+        if (selection != null || selectedHits.isNotEmpty()) {
+            selection = null
+            selectedHits = emptyList()
+            invalidate()
+        }
     }
 
     private fun rectContains(rect: Rect, x: Float, y: Float): Boolean {

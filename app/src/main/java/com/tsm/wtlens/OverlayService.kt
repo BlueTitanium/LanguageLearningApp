@@ -298,6 +298,15 @@ class OverlayService : Service() {
             words = words,
             lines = lines,
             translationHelper = translationHelper,
+            dictionaryLookup = { word ->
+                if (DictionaryManager.isEnabled(this)) {
+                    val entries = DictionaryManager.lookup(this, word)
+                    Log.d(TAG, "dictionary lookup '$word' -> ${entries.size} entries")
+                    if (entries.isNotEmpty()) DictionaryManager.formatEntries(entries) else null
+                } else {
+                    null
+                }
+            },
             scope = serviceScope,
             onCloseRequested = { removeCaptureOverlay() }
         )

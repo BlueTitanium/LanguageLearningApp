@@ -10,11 +10,19 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CompoundButton
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Entry point: grant the "draw over other apps" permission, configure how
@@ -28,6 +36,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sizeValueText: TextView
     private lateinit var opacityValueText: TextView
     private lateinit var swatchViews: List<android.view.View>
+
+    private lateinit var dictionaryStatusText: TextView
+    private lateinit var dictionaryEnableSwitch: Switch
+    private lateinit var dictionaryDownloadButton: Button
+    private lateinit var dictionaryProgressBar: ProgressBar
+    private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var isDownloadingDictionary = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,6 +129,46 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(resetPositionButton)
 
+        // --- Dictionary ---
+        root.addView(sectionLabel("Dictionary (optional)"))
+        root.addView(TextView(this).apply {
+            text = "By default, word lookups use on-device machine translation. " +
+                "Download a real Korean-English dictionary for better definitions " +
+                "(word tried first; falls back to translation if not found)."
+            setPadding(0, 0, 0, 8)
+        })
+
+        dictionaryStatusText = TextView(this)
+        root.addView(dictionaryStatusText)
+
+        dictionaryProgressBar = ProgressBar(
+            this, null, android.R.attr.progressBarStyleHorizontal
+        ).apply {
+            max = 100
+            visibility = android.view.View.GONE
+        }
+        root.addView(dictionaryProgressBar)
+
+        dictionaryDownloadButton = Button(this).apply {
+            setOnClickListener { onDictionaryButtonClicked() }
+        }
+        root.addView(dictionaryDownloadButton)
+
+        dictionaryEnableSwitch = Switch(this).apply {
+            text = "Use offline dictionary"
+            setOnCheckedChangeListener { _, isChecked ->
+                DictionaryManager.setEnabled(this@MainActivity, isChecked)
+            }
+        }
+        root.addView(dictionaryEnableSwitch)
+
+        root.addView(TextView(this).apply {
+            text = DictionaryManager.ATTRIBUTION
+            textSize = 11f
+            setPadding(0, 16, 0, 0)
+            alpha = 0.7f
+        })
+
         val startButton = Button(this).apply {
             text = "2. Start WebtoonLens bubble"
             setOnClickListener { startOverlay() }
@@ -134,6 +189,76 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshStatus()
+        refreshDictionaryUi()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        activityScope.cancel()
+    }
+
+    private fun refreshDictionaryUi() {
+        if (isDownloadingDictionary) return
+        val downloaded = DictionaryManager.isDownloaded(this)
+        dictionaryEnableSwitch.isEnabled = downloaded
+        dictionaryEnableSwitch.setOnCheckedChangeListener(null)
+        dictionaryEnableSwitch.isChecked = DictionaryManager.isEnabled(this)
+        dictionaryEnableSwitch.setOnCheckedChangeListener { _, isChecked ->
+            DictionaryManager.setEnabled(this@MainActivity, isChecked)
+        }
+
+        dictionaryProgressBar.visibility = android.view.View.GONE
+        if (downloaded) {
+            val mb = "%.1f".format(DictionaryManager.dbSizeMb(this))
+            dictionaryStatusText.text = "Dictionary downloaded ($mb MB)."
+            dictionaryDownloadButton.text = "Delete dictionary"
+        } else {
+            dictionaryStatusText.text = "Dictionary not downloaded."
+            dictionaryDownloadButton.text = "Download dictionary (~12 MB)"
+        }
+    }
+
+    private fun onDictionaryButtonClicked() {
+        if (DictionaryManager.isDownloaded(this)) {
+            DictionaryManager.delete(this)
+            refreshDictionaryUi()
+            return
+        }
+
+        isDownloadingDictionary = true
+        dictionaryDownloadButton.isEnabled = false
+        dictionaryProgressBar.visibility = android.view.View.VISIBLE
+        dictionaryProgressBar.isIndeterminate = false
+        dictionaryProgressBar.progress = 0
+        dictionaryStatusText.text = "Downloading dictionary…"
+
+        activityScope.launch {
+            val result = DictionaryManager.download(this@MainActivity) { progress ->
+                when (progress) {
+                    is DictionaryManager.DownloadProgress.Downloading -> {
+                        if (progress.bytesTotal > 0) {
+                            dictionaryProgressBar.isIndeterminate = false
+                            val percent = ((progress.bytesDone * 100) / progress.bytesTotal).toInt()
+                            dictionaryProgressBar.progress = percent
+                            dictionaryStatusText.text = "Downloading dictionary… $percent%"
+                        } else {
+                            dictionaryProgressBar.isIndeterminate = true
+                        }
+                    }
+                    is DictionaryManager.DownloadProgress.BuildingIndex -> {
+                        dictionaryProgressBar.isIndeterminate = true
+                        dictionaryStatusText.text = "Building offline index…"
+                    }
+                }
+            }
+
+            isDownloadingDictionary = false
+            dictionaryDownloadButton.isEnabled = true
+            result.onFailure {
+                dictionaryStatusText.text = "Download failed: ${it.message}"
+            }
+            refreshDictionaryUi()
+        }
     }
 
     private fun sectionLabel(text: String): TextView = TextView(this).apply {
