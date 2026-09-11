@@ -26,6 +26,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class OverlayService : Service() {
@@ -159,10 +160,27 @@ class OverlayService : Service() {
 
     // --- Floating bubble -----------------------------------------------
 
-    private fun addBubble() {
-        val bubble = ImageView(this).apply {
-            setImageResource(R.drawable.ic_bubble)
+    private var bubbleParams: WindowManager.LayoutParams? = null
+
+    private val prefsListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            when (key) {
+                BubblePrefs.KEY_SIZE_DP, BubblePrefs.KEY_OPACITY_PERCENT, BubblePrefs.KEY_COLOR ->
+                    applyBubbleAppearance()
+            }
         }
+
+    private fun addBubble() {
+        BubblePrefs.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
+
+        val bubble = ImageView(this).apply {
+            setImageResource(R.drawable.ic_bubble_dots)
+            val density = resources.displayMetrics.density
+            val padding = (12 * density).toInt()
+            setPadding(padding, padding, padding, padding)
+        }
+
+        val (savedX, savedY) = BubblePrefs.savedPosition(this) ?: (40 to 300)
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -173,9 +191,10 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 40
-            y = 300
+            x = savedX
+            y = savedY
         }
+        bubbleParams = params
 
         var downX = 0f
         var downY = 0f
@@ -203,7 +222,11 @@ class OverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) onBubbleTapped()
+                    if (moved) {
+                        BubblePrefs.savePosition(this@OverlayService, params.x, params.y)
+                    } else {
+                        onBubbleTapped()
+                    }
                     true
                 }
                 else -> false
@@ -212,18 +235,48 @@ class OverlayService : Service() {
 
         windowManager.addView(bubble, params)
         bubbleView = bubble
+        applyBubbleAppearance()
+    }
+
+    private fun applyBubbleAppearance() {
+        val bubble = bubbleView as? ImageView ?: return
+        val density = resources.displayMetrics.density
+        val sizePx = (BubblePrefs.sizeDp(this) * density).toInt()
+        val opacity = BubblePrefs.opacityPercent(this) / 100f
+        val color = BubblePrefs.color(this)
+
+        val background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(color)
+        }
+        bubble.background = background
+        bubble.alpha = opacity
+
+        val params = bubbleParams
+        if (params != null && (params.width != sizePx || params.height != sizePx)) {
+            params.width = sizePx
+            params.height = sizePx
+            runCatching { windowManager.updateViewLayout(bubble, params) }
+        }
     }
 
     private fun onBubbleTapped() {
         if (isCapturing) return
         val capture = screenCapture ?: return
         isCapturing = true
+        // Hide the bubble *before* capturing so it doesn't bake itself into
+        // the screenshot; give the compositor a moment to redraw without it.
+        bubbleView?.visibility = View.GONE
 
         serviceScope.launch {
             try {
+                delay(120)
                 val bitmap = capture.captureFrame(windowManager)
                 val (words, lines) = ocrHelper.recognize(bitmap)
                 showCaptureOverlay(bitmap, words, lines)
+            } catch (e: Exception) {
+                Log.e(TAG, "capture/OCR failed", e)
+                bubbleView?.visibility = View.VISIBLE
             } finally {
                 isCapturing = false
             }
@@ -272,11 +325,16 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        runCatching {
+            BubblePrefs.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
+        }
         removeCaptureOverlay()
         bubbleView?.let { runCatching { windowManager.removeView(it) } }
         bubbleView = null
         ocrHelper.close()
         translationHelper.close()
+        screenCapture?.release()
+        screenCapture = null
         mediaProjection?.stop()
         mediaProjection = null
         serviceScope.cancel()
