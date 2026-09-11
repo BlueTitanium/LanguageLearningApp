@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">WebtoonLens</string>
+    <string name="notif_channel_name">WebtoonLens Overlay</string>
+    <string name="notif_content_text">Tap the bubble to translate the screen</string>
+</resources>
