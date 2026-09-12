@@ -336,7 +336,18 @@ class OverlayService : Service() {
             },
             scope = serviceScope,
             onCloseRequested = { removeCaptureOverlay() },
-            onDefinitionTapped = { detail -> showWordDetail(detail) }
+            onDefinitionTapped = { detail ->
+                serviceScope.launch {
+                    val isSingleWord = detail.words.size <= 1
+                    val breakdown = if (!isSingleWord) buildSentenceBreakdown(detail.words) else emptyList()
+                    val conjugationRoot = if (isSingleWord) {
+                        KoreanMorphAnalyzer.findPredicateRoot(detail.original)
+                    } else {
+                        null
+                    }
+                    showWordDetail(detail.copy(breakdown = breakdown, conjugationRoot = conjugationRoot))
+                }
+            }
         )
 
         val params = WindowManager.LayoutParams(
@@ -360,6 +371,27 @@ class OverlayService : Service() {
     }
 
     // --- Word detail panel ------------------------------------------------
+
+    /**
+     * Per-word role (via [SentenceAnalyzer]'s particle heuristic) and gloss.
+     * Deliberately uses the dictionary/on-device translator for these small
+     * per-word glosses rather than the user's (possibly quota-limited, paid)
+     * online API - that's reserved for the headline phrase translation.
+     */
+    private suspend fun buildSentenceBreakdown(words: List<String>): List<SentenceWordBreakdown> {
+        return words.mapIndexed { index, word ->
+            val role = SentenceAnalyzer.classifyRole(word, isLast = index == words.lastIndex)
+            val gloss = runCatching {
+                if (DictionaryManager.isEnabled(this)) {
+                    val entries = DictionaryManager.lookup(this, word)
+                    if (entries.isNotEmpty()) entries.first().gloss else translationHelper.translate(word)
+                } else {
+                    translationHelper.translate(word)
+                }
+            }.getOrNull()
+            SentenceWordBreakdown(word, role, gloss)
+        }
+    }
 
     private fun showWordDetail(detail: WordLookupDetail) {
         removeWordDetail()

@@ -46,4 +46,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
+    // Korean morphological analyzer, for finding the dictionary/citation
+    // root form of conjugated verbs and adjectives (handles irregular
+    // conjugations properly, unlike plain suffix stripping).
+    implementation("com.github.shin285:KOMORAN:3.4.0-beta")
 }

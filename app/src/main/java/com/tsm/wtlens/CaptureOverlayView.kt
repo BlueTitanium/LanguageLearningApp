@@ -244,7 +244,8 @@ class CaptureOverlayView(
                     original = sel.text,
                     entries = sel.dictEntries,
                     fallbackTranslation = sel.translated ?: "",
-                    sourceLabel = sel.source ?: "Translation"
+                    sourceLabel = sel.source ?: "Translation",
+                    words = selectedHits.map { it.text }
                 )
             )
             return

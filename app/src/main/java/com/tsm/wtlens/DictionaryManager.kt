@@ -42,7 +42,7 @@ object DictionaryManager {
         "습니다", "합니다", "했습니다", "하였습니다", "했어요", "하였어요", "해요", "이에요", "예요",
         "이었다", "였다", "했다", "한다", "이다", "에서", "에게", "한테", "까지", "부터", "으로",
         "면서", "니까", "지만", "거나", "든지", "고는", "다가",
-        "는", "은", "이", "가", "을", "를", "와", "과", "도", "만", "의", "로", "고", "서", "면", "다"
+        "는", "은", "이", "가", "을", "를", "와", "과", "도", "만", "의", "로", "고", "서", "면", "다", "에"
     ).sortedByDescending { it.length }
 
     private fun dbFile(context: Context): File = File(context.filesDir, "kengdic.db")
@@ -209,8 +209,25 @@ object DictionaryManager {
             val cleaned = word.trim(*TRIM_CHARS)
             if (cleaned.isEmpty()) return@withContext emptyList()
             val db = openDb(context) ?: return@withContext emptyList()
+
+            // Try the linguistically-correct root first (handles irregular
+            // conjugations, e.g. 들어요 -> 듣다), then fall back to naive
+            // suffix stripping for whatever KOMORAN doesn't resolve. Only
+            // for single-word lookups: on a full sentence/phrase, this would
+            // just find ONE predicate anywhere in it and, if that happened
+            // to also be a real dictionary word, wrongly hijack the whole
+            // phrase's lookup into that one verb's definition.
+            val morphRoot = if (!cleaned.contains(' ')) {
+                KoreanMorphAnalyzer.findPredicateRoot(cleaned).also {
+                    Log.d(TAG, "'$cleaned' -> KOMORAN root: $it")
+                }
+            } else {
+                null
+            }
+
             val candidates = buildList {
                 add(cleaned)
+                morphRoot?.let { add(it) }
                 for (suffix in STRIP_SUFFIXES) {
                     if (cleaned.length > suffix.length && cleaned.endsWith(suffix)) {
                         add(cleaned.removeSuffix(suffix))

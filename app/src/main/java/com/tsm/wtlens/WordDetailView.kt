@@ -19,7 +19,18 @@ data class WordLookupDetail(
     val original: String,
     val entries: List<DictionaryEntry>,
     val fallbackTranslation: String,
-    val sourceLabel: String
+    val sourceLabel: String,
+    /** The individual OCR word tokens that made up this selection, in reading order. */
+    val words: List<String> = emptyList(),
+    /** Populated only for multi-word selections; see [SentenceAnalyzer]. */
+    val breakdown: List<SentenceWordBreakdown> = emptyList(),
+    /**
+     * The dictionary/citation form of [original], from [KoreanMorphAnalyzer],
+     * independent of whether a dictionary entry was actually found - so a
+     * word that fell back to online/on-device translation still shows its
+     * conjugation root when one exists.
+     */
+    val conjugationRoot: String? = null
 )
 
 /**
@@ -62,19 +73,43 @@ class WordDetailView(
             setTypeface(typeface, Typeface.BOLD)
         })
 
-        if (detail.entries.isNotEmpty()) {
-            val root = detail.entries.first().surface
-            if (root != detail.original) {
+        if (detail.breakdown.isNotEmpty()) {
+            card.addView(TextView(context).apply {
+                text = "Sentence breakdown (rough guide, not a full parse)"
+                setTextColor(Color.argb(220, 130, 200, 255))
+                textSize = 13f
+                setPadding(0, dp(14), 0, dp(6))
+            })
+            detail.breakdown.forEachIndexed { index, word ->
                 card.addView(TextView(context).apply {
-                    text = "Dictionary base form: $root"
-                    setTextColor(Color.argb(220, 130, 200, 255))
-                    textSize = 14f
-                    setPadding(0, dp(6), 0, dp(14))
+                    val glossPart = word.gloss?.let { " — \"$it\"" } ?: ""
+                    text = "${index + 1}. ${word.text} — ${word.role}$glossPart"
+                    setTextColor(Color.WHITE)
+                    textSize = 15f
+                    setPadding(0, dp(3), 0, dp(3))
                 })
-            } else {
-                card.addView(spacer(dp(14)))
             }
+            card.addView(divider(dp(1), dp(14)))
+        }
 
+        // Prefer KOMORAN's linguistically-derived root; fall back to
+        // whichever dictionary entry surface actually matched (may differ
+        // slightly, e.g. via the old suffix-stripping heuristic).
+        val displayRoot = (detail.conjugationRoot ?: detail.entries.firstOrNull()?.surface)
+            ?.takeIf { it != detail.original }
+
+        if (displayRoot != null) {
+            card.addView(TextView(context).apply {
+                text = "Base/dictionary form: $displayRoot"
+                setTextColor(Color.argb(220, 130, 200, 255))
+                textSize = 14f
+                setPadding(0, dp(6), 0, dp(14))
+            })
+        } else {
+            card.addView(spacer(dp(14)))
+        }
+
+        if (detail.entries.isNotEmpty()) {
             detail.entries.take(10).forEachIndexed { index, entry ->
                 card.addView(TextView(context).apply {
                     val hanjaPart = if (!entry.hanja.isNullOrBlank()) "  (${entry.hanja})" else ""
@@ -118,6 +153,13 @@ class WordDetailView(
 
     private fun spacer(heightPx: Int) = View(context).apply {
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPx)
+    }
+
+    private fun divider(heightPx: Int, marginPx: Int) = View(context).apply {
+        setBackgroundColor(Color.argb(60, 255, 255, 255))
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, heightPx
+        ).apply { topMargin = marginPx; bottomMargin = marginPx }
     }
 
     /** A ScrollView that wraps its content up to [maxHeightPx], then scrolls. */
