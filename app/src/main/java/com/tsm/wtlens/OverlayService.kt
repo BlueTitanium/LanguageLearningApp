@@ -41,6 +41,7 @@ class OverlayService : Service() {
 
     private var bubbleView: View? = null
     private var captureOverlayView: CaptureOverlayView? = null
+    private var wordDetailView: WordDetailView? = null
     private var isCapturing = false
 
     override fun onCreate() {
@@ -311,9 +312,9 @@ class OverlayService : Service() {
                 if (DictionaryManager.isEnabled(this)) {
                     val entries = DictionaryManager.lookup(this, word)
                     Log.d(TAG, "dictionary lookup '$word' -> ${entries.size} entries")
-                    if (entries.isNotEmpty()) DictionaryManager.formatEntries(entries) else null
+                    entries
                 } else {
-                    null
+                    emptyList()
                 }
             },
             onlineTranslate = { text ->
@@ -334,7 +335,8 @@ class OverlayService : Service() {
                 }
             },
             scope = serviceScope,
-            onCloseRequested = { removeCaptureOverlay() }
+            onCloseRequested = { removeCaptureOverlay() },
+            onDefinitionTapped = { detail -> showWordDetail(detail) }
         )
 
         val params = WindowManager.LayoutParams(
@@ -351,9 +353,32 @@ class OverlayService : Service() {
     }
 
     private fun removeCaptureOverlay() {
+        removeWordDetail()
         captureOverlayView?.let { windowManager.removeView(it) }
         captureOverlayView = null
         bubbleView?.visibility = View.VISIBLE
+    }
+
+    // --- Word detail panel ------------------------------------------------
+
+    private fun showWordDetail(detail: WordLookupDetail) {
+        removeWordDetail()
+        val view = WordDetailView(this, detail, onDismiss = { removeWordDetail() })
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(view, params)
+        view.requestFocus()
+        wordDetailView = view
+    }
+
+    private fun removeWordDetail() {
+        wordDetailView?.let { runCatching { windowManager.removeView(it) } }
+        wordDetailView = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

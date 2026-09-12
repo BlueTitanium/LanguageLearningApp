@@ -31,10 +31,11 @@ class CaptureOverlayView(
     private val lines: List<OcrHit>,
     private val closeButtonCenter: Pair<Float, Float>?,
     private val translationHelper: TranslationHelper,
-    private val dictionaryLookup: suspend (String) -> String?,
+    private val dictionaryLookup: suspend (String) -> List<DictionaryEntry>,
     private val onlineTranslate: suspend (String) -> Pair<String, String>?,
     private val scope: CoroutineScope,
-    private val onCloseRequested: () -> Unit
+    private val onCloseRequested: () -> Unit,
+    private val onDefinitionTapped: (WordLookupDetail) -> Unit
 ) : View(context) {
 
     private data class Selection(
@@ -43,7 +44,8 @@ class CaptureOverlayView(
         val anchor: RectF,
         var translated: String?,
         var loading: Boolean,
-        var source: String? = null
+        var source: String? = null,
+        var dictEntries: List<DictionaryEntry> = emptyList()
     )
 
     private var selection: Selection? = null
@@ -107,6 +109,7 @@ class CaptureOverlayView(
     }
 
     private val closeButtonRect = RectF()
+    private var lastPopupBox: RectF? = null
 
     // --- Drag/lasso tracking --------------------------------------------
     private var dragPath: Path? = null
@@ -156,7 +159,12 @@ class CaptureOverlayView(
             closeButtonTextPaint
         )
 
-        selection?.let { sel -> drawPopup(canvas, sel) }
+        val sel = selection
+        if (sel != null) {
+            drawPopup(canvas, sel)
+        } else {
+            lastPopupBox = null
+        }
     }
 
     private fun drawPopup(canvas: Canvas, sel: Selection) {
@@ -164,7 +172,7 @@ class CaptureOverlayView(
         val paddingV = 24f
         val original = sel.text
         val translated = if (sel.loading) "Translating…" else (sel.translated ?: "")
-        val sourceLabel = sel.source?.takeIf { !sel.loading }
+        val sourceLabel = sel.source?.takeIf { !sel.loading }?.let { "$it · tap for more" }
 
         val originalWidth = popupOriginalPaint.measureText(original)
         val translatedWidth = popupTranslatedPaint.measureText(translated)
@@ -185,6 +193,9 @@ class CaptureOverlayView(
         if (sourceLabel != null) {
             canvas.drawText(sourceLabel, box.left + paddingH, box.top + paddingV + 112f, popupSourcePaint)
         }
+
+        // Only tappable-for-detail once it's done loading (nothing to expand into yet otherwise).
+        lastPopupBox = if (!sel.loading) box else null
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -222,6 +233,20 @@ class CaptureOverlayView(
     private fun handleTap(x: Float, y: Float) {
         if (closeButtonRect.contains(x, y)) {
             onCloseRequested()
+            return
+        }
+
+        val sel = selection
+        val popupBox = lastPopupBox
+        if (sel != null && popupBox != null && popupBox.contains(x, y)) {
+            onDefinitionTapped(
+                WordLookupDetail(
+                    original = sel.text,
+                    entries = sel.dictEntries,
+                    fallbackTranslation = sel.translated ?: "",
+                    sourceLabel = sel.source ?: "Translation"
+                )
+            )
             return
         }
 
@@ -275,11 +300,11 @@ class CaptureOverlayView(
         invalidate()
 
         scope.launch {
-            val dictResult = runCatching { dictionaryLookup(text) }.getOrNull()
+            val dictEntries = runCatching { dictionaryLookup(text) }.getOrDefault(emptyList())
             var result: String
             var source: String
-            if (dictResult != null) {
-                result = dictResult
+            if (dictEntries.isNotEmpty()) {
+                result = DictionaryManager.formatEntries(dictEntries)
                 source = "Dictionary"
             } else {
                 val online = runCatching { onlineTranslate(text) }.getOrNull()
@@ -293,7 +318,9 @@ class CaptureOverlayView(
                 }
             }
             if (selection?.id == id) {
-                selection = selection?.copy(translated = result, loading = false, source = source)
+                selection = selection?.copy(
+                    translated = result, loading = false, source = source, dictEntries = dictEntries
+                )
                 invalidate()
             }
         }
