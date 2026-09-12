@@ -31,6 +31,7 @@ class CaptureOverlayView(
     private val lines: List<OcrHit>,
     private val translationHelper: TranslationHelper,
     private val dictionaryLookup: suspend (String) -> String?,
+    private val onlineTranslate: suspend (String) -> Pair<String, String>?,
     private val scope: CoroutineScope,
     private val onCloseRequested: () -> Unit
 ) : View(context) {
@@ -266,15 +267,21 @@ class CaptureOverlayView(
 
         scope.launch {
             val dictResult = runCatching { dictionaryLookup(text) }.getOrNull()
-            val result: String
-            val source: String
+            var result: String
+            var source: String
             if (dictResult != null) {
                 result = dictResult
                 source = "Dictionary"
             } else {
-                result = runCatching { translationHelper.translate(text) }
-                    .getOrElse { "(translation failed)" }
-                source = "Translation"
+                val online = runCatching { onlineTranslate(text) }.getOrNull()
+                if (online != null) {
+                    result = online.first
+                    source = online.second
+                } else {
+                    result = runCatching { translationHelper.translate(text) }
+                        .getOrElse { "(translation failed)" }
+                    source = "On-device translation"
+                }
             }
             if (selection?.id == id) {
                 selection = selection?.copy(translated = result, loading = false, source = source)

@@ -7,12 +7,16 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CompoundButton
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
@@ -43,6 +47,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dictionaryProgressBar: ProgressBar
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isDownloadingDictionary = false
+
+    private lateinit var onlineProviderGroup: RadioGroup
+    private lateinit var onlineGuideText: TextView
+    private lateinit var onlinePapagoFields: LinearLayout
+    private lateinit var onlineDeeplFields: LinearLayout
+    private lateinit var onlineGoogleFields: LinearLayout
+    private lateinit var onlinePapagoClientIdEdit: EditText
+    private lateinit var onlinePapagoClientSecretEdit: EditText
+    private lateinit var onlineDeeplKeyEdit: EditText
+    private lateinit var onlineGoogleKeyEdit: EditText
+    private lateinit var onlineEnableSwitch: Switch
+    private lateinit var onlineStatusText: TextView
+    private lateinit var onlineTestButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -169,13 +186,15 @@ class MainActivity : AppCompatActivity() {
             alpha = 0.7f
         })
 
+        buildOnlineTranslationSection(root)
+
         val startButton = Button(this).apply {
             text = "2. Start WebtoonLens bubble"
             setOnClickListener { startOverlay() }
         }
         root.addView(startButton)
 
-        setContentView(root)
+        setContentView(android.widget.ScrollView(this).apply { addView(root) })
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ActivityCompat.requestPermissions(
@@ -190,6 +209,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         refreshStatus()
         refreshDictionaryUi()
+        refreshOnlineUi()
     }
 
     override fun onDestroy() {
@@ -258,6 +278,177 @@ class MainActivity : AppCompatActivity() {
                 dictionaryStatusText.text = "Download failed: ${it.message}"
             }
             refreshDictionaryUi()
+        }
+    }
+
+    private fun buildOnlineTranslationSection(root: LinearLayout) {
+        root.addView(sectionLabel("Online translation API (optional)"))
+        root.addView(TextView(this).apply {
+            text = "For the most accurate results, you can bring your own API key from a " +
+                "translation service. This is tried after the dictionary and before " +
+                "falling back to the on-device translator. Your key is stored encrypted " +
+                "on this device only."
+            setPadding(0, 0, 0, 8)
+        })
+
+        val currentProvider = OnlineTranslationManager.provider(this)
+        onlineProviderGroup = RadioGroup(this).apply { orientation = LinearLayout.VERTICAL }
+        val providerButtons = OnlineTranslationManager.Provider.entries.associateWith { provider ->
+            RadioButton(this).apply {
+                text = provider.label
+                id = android.view.View.generateViewId()
+                isChecked = provider == currentProvider
+            }
+        }
+        providerButtons.values.forEach { onlineProviderGroup.addView(it) }
+        root.addView(onlineProviderGroup)
+
+        onlineGuideText = TextView(this).apply {
+            textSize = 12f
+            setPadding(0, 8, 0, 8)
+            alpha = 0.85f
+        }
+        root.addView(onlineGuideText)
+
+        onlinePapagoFields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        onlinePapagoClientIdEdit = EditText(this).apply { hint = "Client ID" }
+        onlinePapagoClientSecretEdit = EditText(this).apply {
+            hint = "Client Secret"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        onlinePapagoFields.addView(onlinePapagoClientIdEdit)
+        onlinePapagoFields.addView(onlinePapagoClientSecretEdit)
+        root.addView(onlinePapagoFields)
+
+        onlineDeeplFields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        onlineDeeplKeyEdit = EditText(this).apply {
+            hint = "DeepL API key"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        onlineDeeplFields.addView(onlineDeeplKeyEdit)
+        root.addView(onlineDeeplFields)
+
+        onlineGoogleFields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        onlineGoogleKeyEdit = EditText(this).apply {
+            hint = "Google Cloud API key"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        onlineGoogleFields.addView(onlineGoogleKeyEdit)
+        root.addView(onlineGoogleFields)
+
+        // Pre-fill any previously saved credentials.
+        val (papagoId, papagoSecret) = OnlineTranslationManager.papagoCredentials(this)
+        onlinePapagoClientIdEdit.setText(papagoId)
+        onlinePapagoClientSecretEdit.setText(papagoSecret)
+        onlineDeeplKeyEdit.setText(OnlineTranslationManager.deeplApiKey(this))
+        onlineGoogleKeyEdit.setText(OnlineTranslationManager.googleApiKey(this))
+
+        val saveButton = Button(this).apply {
+            text = "Save credentials"
+            setOnClickListener { saveOnlineCredentials() }
+        }
+        root.addView(saveButton)
+
+        onlineStatusText = TextView(this)
+        root.addView(onlineStatusText)
+
+        onlineTestButton = Button(this).apply {
+            text = "Test connection"
+            setOnClickListener { testOnlineTranslation() }
+        }
+        root.addView(onlineTestButton)
+
+        onlineEnableSwitch = Switch(this).apply {
+            text = "Prefer online translation over on-device"
+            setOnCheckedChangeListener { _, isChecked ->
+                OnlineTranslationManager.setUserEnabled(this@MainActivity, isChecked)
+                refreshOnlineUi()
+            }
+        }
+        root.addView(onlineEnableSwitch)
+
+        onlineProviderGroup.setOnCheckedChangeListener { _, checkedId ->
+            val selected = providerButtons.entries.firstOrNull { it.value.id == checkedId }?.key
+                ?: OnlineTranslationManager.Provider.NONE
+            OnlineTranslationManager.setProvider(this, selected)
+            refreshOnlineUi()
+        }
+
+        refreshOnlineUi()
+    }
+
+    private fun refreshOnlineUi() {
+        val provider = OnlineTranslationManager.provider(this)
+        onlinePapagoFields.visibility =
+            if (provider == OnlineTranslationManager.Provider.PAPAGO) android.view.View.VISIBLE else android.view.View.GONE
+        onlineDeeplFields.visibility =
+            if (provider == OnlineTranslationManager.Provider.DEEPL) android.view.View.VISIBLE else android.view.View.GONE
+        onlineGoogleFields.visibility =
+            if (provider == OnlineTranslationManager.Provider.GOOGLE) android.view.View.VISIBLE else android.view.View.GONE
+
+        onlineGuideText.text = when (provider) {
+            OnlineTranslationManager.Provider.NONE -> ""
+            OnlineTranslationManager.Provider.PAPAGO ->
+                "Setup: sign up for a free Naver Cloud Platform account at ncloud.com, " +
+                    "open Console → AI·Application Service → Papago Translation, create an " +
+                    "application to enable the Translation API, then copy its Client ID and " +
+                    "Client Secret below. Free tier: ~10,000 characters/day."
+            OnlineTranslationManager.Provider.DEEPL ->
+                "Setup: sign up at deepl.com/pro-api, then open Account → API Keys and copy " +
+                    "your authentication key below. Free/low-volume keys end in \":fx\"."
+            OnlineTranslationManager.Provider.GOOGLE ->
+                "Setup: create a project at console.cloud.google.com, enable the \"Cloud " +
+                    "Translation API\" under APIs & Services, then create an API key under " +
+                    "Credentials and paste it below. Requires billing enabled on the project " +
+                    "(includes a free monthly quota)."
+        }
+
+        val configured = OnlineTranslationManager.isConfigured(this)
+        onlineEnableSwitch.isEnabled = configured
+        onlineEnableSwitch.setOnCheckedChangeListener(null)
+        onlineEnableSwitch.isChecked = OnlineTranslationManager.isUserEnabled(this) && configured
+        onlineEnableSwitch.setOnCheckedChangeListener { _, isChecked ->
+            OnlineTranslationManager.setUserEnabled(this@MainActivity, isChecked)
+            refreshOnlineUi()
+        }
+        onlineTestButton.isEnabled = configured
+
+        onlineStatusText.text = when {
+            provider == OnlineTranslationManager.Provider.NONE -> "Not using an online provider."
+            configured && OnlineTranslationManager.isActive(this) -> "Active: using ${provider.label}."
+            configured -> "Credentials saved, but not enabled above."
+            else -> "Enter and save credentials to use ${provider.label}."
+        }
+    }
+
+    private fun saveOnlineCredentials() {
+        when (OnlineTranslationManager.provider(this)) {
+            OnlineTranslationManager.Provider.PAPAGO -> OnlineTranslationManager.setPapagoCredentials(
+                this,
+                onlinePapagoClientIdEdit.text.toString().trim(),
+                onlinePapagoClientSecretEdit.text.toString().trim()
+            )
+            OnlineTranslationManager.Provider.DEEPL -> OnlineTranslationManager.setDeeplApiKey(
+                this, onlineDeeplKeyEdit.text.toString().trim()
+            )
+            OnlineTranslationManager.Provider.GOOGLE -> OnlineTranslationManager.setGoogleApiKey(
+                this, onlineGoogleKeyEdit.text.toString().trim()
+            )
+            OnlineTranslationManager.Provider.NONE -> {}
+        }
+        refreshOnlineUi()
+    }
+
+    private fun testOnlineTranslation() {
+        onlineTestButton.isEnabled = false
+        onlineStatusText.text = "Testing…"
+        activityScope.launch {
+            val result = OnlineTranslationManager.translate(this@MainActivity, "안녕하세요")
+            onlineTestButton.isEnabled = true
+            result.fold(
+                onSuccess = { onlineStatusText.text = "Test succeeded: \"안녕하세요\" → \"$it\"" },
+                onFailure = { onlineStatusText.text = "Test failed: ${it.message}" }
+            )
         }
     }
 

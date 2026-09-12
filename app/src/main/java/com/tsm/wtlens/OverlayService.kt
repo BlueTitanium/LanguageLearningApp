@@ -307,6 +307,23 @@ class OverlayService : Service() {
                     null
                 }
             },
+            onlineTranslate = { text ->
+                if (OnlineTranslationManager.isActive(this)) {
+                    val provider = OnlineTranslationManager.provider(this)
+                    OnlineTranslationManager.translate(this, text).fold(
+                        onSuccess = { translated ->
+                            Log.d(TAG, "online translate via ${provider.label} succeeded")
+                            translated to provider.label
+                        },
+                        onFailure = { e ->
+                            Log.e(TAG, "online translate via ${provider.label} failed", e)
+                            null
+                        }
+                    )
+                } else {
+                    null
+                }
+            },
             scope = serviceScope,
             onCloseRequested = { removeCaptureOverlay() }
         )
