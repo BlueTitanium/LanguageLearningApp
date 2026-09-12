@@ -29,6 +29,7 @@ class CaptureOverlayView(
     private val screenshot: Bitmap,
     private val words: List<OcrHit>,
     private val lines: List<OcrHit>,
+    private val closeButtonCenter: Pair<Float, Float>?,
     private val translationHelper: TranslationHelper,
     private val dictionaryLookup: suspend (String) -> String?,
     private val onlineTranslate: suspend (String) -> Pair<String, String>?,
@@ -118,7 +119,15 @@ class CaptureOverlayView(
         super.onSizeChanged(w, h, oldw, oldh)
         val margin = 24f
         val size = 96f
-        closeButtonRect.set(w - margin - size, margin, w - margin, margin + size)
+
+        if (closeButtonCenter != null) {
+            val (cx, cy) = closeButtonCenter
+            val left = (cx - size / 2).coerceIn(margin, w - margin - size)
+            val top = (cy - size / 2).coerceIn(margin, h - margin - size)
+            closeButtonRect.set(left, top, left + size, top + size)
+        } else {
+            closeButtonRect.set(w - margin - size, margin, w - margin, margin + size)
+        }
     }
 
     override fun onDraw(canvas: Canvas) {

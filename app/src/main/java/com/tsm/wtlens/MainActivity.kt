@@ -78,12 +78,12 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(grantOverlayButton)
 
-        root.addView(sectionLabel("Bubble appearance"))
+        val visuals = addCollapsible(root, "Visuals", initiallyExpanded = true)
 
         // --- Size ---
         sizeValueText = TextView(this)
-        root.addView(sizeValueText)
-        root.addView(SeekBar(this).apply {
+        visuals.addView(sizeValueText)
+        visuals.addView(SeekBar(this).apply {
             max = BubblePrefs.MAX_SIZE_DP - BubblePrefs.MIN_SIZE_DP
             progress = BubblePrefs.sizeDp(this@MainActivity) - BubblePrefs.MIN_SIZE_DP
             updateSizeLabel(BubblePrefs.sizeDp(this@MainActivity))
@@ -103,8 +103,8 @@ class MainActivity : AppCompatActivity() {
 
         // --- Opacity ---
         opacityValueText = TextView(this)
-        root.addView(opacityValueText)
-        root.addView(SeekBar(this).apply {
+        visuals.addView(opacityValueText)
+        visuals.addView(SeekBar(this).apply {
             max = 100 - BubblePrefs.MIN_OPACITY_PERCENT
             progress = BubblePrefs.opacityPercent(this@MainActivity) - BubblePrefs.MIN_OPACITY_PERCENT
             updateOpacityLabel(BubblePrefs.opacityPercent(this@MainActivity))
@@ -123,7 +123,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         // --- Color ---
-        root.addView(sectionLabel("Color"))
+        visuals.addView(sectionLabel("Color"))
         val swatchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -136,7 +136,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         swatchViews.forEach { swatchRow.addView(it) }
-        root.addView(swatchRow)
+        visuals.addView(swatchRow)
 
         val resetPositionButton = Button(this).apply {
             text = "Reset bubble position"
@@ -144,11 +144,15 @@ class MainActivity : AppCompatActivity() {
                 BubblePrefs.resetPosition(this@MainActivity)
             }
         }
-        root.addView(resetPositionButton)
+        visuals.addView(resetPositionButton)
 
-        // --- Dictionary ---
-        root.addView(sectionLabel("Dictionary (optional)"))
-        root.addView(TextView(this).apply {
+        // --- Dictionary (offline + online) ---
+        val dictionaryCategory = addCollapsible(root, "Dictionary", initiallyExpanded = false)
+
+        val offline = addCollapsible(
+            dictionaryCategory, "Offline dictionary", indentDp = 16, initiallyExpanded = false
+        )
+        offline.addView(TextView(this).apply {
             text = "By default, word lookups use on-device machine translation. " +
                 "Download a real Korean-English dictionary for better definitions " +
                 "(word tried first; falls back to translation if not found)."
@@ -156,7 +160,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         dictionaryStatusText = TextView(this)
-        root.addView(dictionaryStatusText)
+        offline.addView(dictionaryStatusText)
 
         dictionaryProgressBar = ProgressBar(
             this, null, android.R.attr.progressBarStyleHorizontal
@@ -164,12 +168,12 @@ class MainActivity : AppCompatActivity() {
             max = 100
             visibility = android.view.View.GONE
         }
-        root.addView(dictionaryProgressBar)
+        offline.addView(dictionaryProgressBar)
 
         dictionaryDownloadButton = Button(this).apply {
             setOnClickListener { onDictionaryButtonClicked() }
         }
-        root.addView(dictionaryDownloadButton)
+        offline.addView(dictionaryDownloadButton)
 
         dictionaryEnableSwitch = Switch(this).apply {
             text = "Use offline dictionary"
@@ -177,16 +181,19 @@ class MainActivity : AppCompatActivity() {
                 DictionaryManager.setEnabled(this@MainActivity, isChecked)
             }
         }
-        root.addView(dictionaryEnableSwitch)
+        offline.addView(dictionaryEnableSwitch)
 
-        root.addView(TextView(this).apply {
+        offline.addView(TextView(this).apply {
             text = DictionaryManager.ATTRIBUTION
             textSize = 11f
             setPadding(0, 16, 0, 0)
             alpha = 0.7f
         })
 
-        buildOnlineTranslationSection(root)
+        val online = addCollapsible(
+            dictionaryCategory, "Online translation API", indentDp = 16, initiallyExpanded = false
+        )
+        buildOnlineTranslationSection(online)
 
         val startButton = Button(this).apply {
             text = "2. Start WebtoonLens bubble"
@@ -282,7 +289,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildOnlineTranslationSection(root: LinearLayout) {
-        root.addView(sectionLabel("Online translation API (optional)"))
         root.addView(TextView(this).apply {
             text = "For the most accurate results, you can bring your own API key from a " +
                 "translation service. This is tried after the dictionary and before " +
@@ -450,6 +456,56 @@ class MainActivity : AppCompatActivity() {
                 onFailure = { onlineStatusText.text = "Test failed: ${it.message}" }
             )
         }
+    }
+
+    /**
+     * Adds a clickable header to [parent] that toggles a content container's
+     * visibility, and returns that container for callers to populate.
+     */
+    private fun addCollapsible(
+        parent: LinearLayout,
+        title: String,
+        indentDp: Int = 0,
+        initiallyExpanded: Boolean = false
+    ): LinearLayout {
+        val density = resources.displayMetrics.density
+        val indentPx = (indentDp * density).toInt()
+
+        val arrow = TextView(this).apply {
+            text = if (initiallyExpanded) "▾" else "▸"
+            textSize = 16f
+            setPadding(0, 0, (12 * density).toInt(), 0)
+        }
+        val titleView = TextView(this).apply {
+            text = title
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            textSize = if (indentDp == 0) 16f else 14f
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(indentPx, (24 * density).toInt(), 0, (16 * density).toInt())
+            isClickable = true
+            isFocusable = true
+            addView(arrow)
+            addView(titleView)
+        }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (initiallyExpanded) android.view.View.VISIBLE else android.view.View.GONE
+            setPadding(indentPx, 0, 0, 0)
+        }
+
+        header.setOnClickListener {
+            val expanded = content.visibility == android.view.View.VISIBLE
+            content.visibility = if (expanded) android.view.View.GONE else android.view.View.VISIBLE
+            arrow.text = if (expanded) "▸" else "▾"
+        }
+
+        parent.addView(header)
+        parent.addView(content)
+        return content
     }
 
     private fun sectionLabel(text: String): TextView = TextView(this).apply {

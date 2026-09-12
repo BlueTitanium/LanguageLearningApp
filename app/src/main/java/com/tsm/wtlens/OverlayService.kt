@@ -292,11 +292,20 @@ class OverlayService : Service() {
     ) {
         bubbleView?.visibility = View.GONE
 
+        val bubbleLayoutParams = bubbleParams
+        val bubbleCenterX = bubbleLayoutParams?.let { it.x + it.width / 2f }
+        val bubbleCenterY = bubbleLayoutParams?.let { it.y + it.height / 2f }
+
         val overlay = CaptureOverlayView(
             context = this,
             screenshot = bitmap,
             words = words,
             lines = lines,
+            closeButtonCenter = if (bubbleCenterX != null && bubbleCenterY != null) {
+                bubbleCenterX to bubbleCenterY
+            } else {
+                null
+            },
             translationHelper = translationHelper,
             dictionaryLookup = { word ->
                 if (DictionaryManager.isEnabled(this)) {
