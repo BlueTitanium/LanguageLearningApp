@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var onlineDeeplKeyEdit: EditText
     private lateinit var onlineGoogleKeyEdit: EditText
     private lateinit var onlineEnableSwitch: Switch
+    private lateinit var onlineContextAwareSwitch: Switch
     private lateinit var onlineStatusText: TextView
     private lateinit var onlineTestButton: Button
 
@@ -372,6 +373,25 @@ class MainActivity : AppCompatActivity() {
             }
         }
         root.addView(onlineEnableSwitch)
+
+        onlineContextAwareSwitch = Switch(this).apply {
+            text = "Context-aware word definitions (DeepL only)"
+            isChecked = OnlineTranslationManager.isContextAwareEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, isChecked ->
+                OnlineTranslationManager.setContextAwareEnabled(this@MainActivity, isChecked)
+            }
+        }
+        root.addView(onlineContextAwareSwitch)
+        root.addView(TextView(this).apply {
+            text = "When tapping a single word (not a circled phrase), sends the " +
+                "containing sentence as extra context so DeepL can pick the right " +
+                "sense — otherwise each word is translated in isolation. Adds a bit of " +
+                "latency and skips the offline dictionary first, so it may feel slower. " +
+                "No effect with Papago/Google — only DeepL's API supports this."
+            textSize = 12f
+            alpha = 0.8f
+            setPadding(0, 0, 0, 8)
+        })
 
         onlineProviderGroup.setOnCheckedChangeListener { _, checkedId ->
             val selected = providerButtons.entries.firstOrNull { it.value.id == checkedId }?.key

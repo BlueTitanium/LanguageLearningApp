@@ -317,10 +317,13 @@ class OverlayService : Service() {
                     emptyList()
                 }
             },
-            onlineTranslate = { text ->
+            onlineTranslate = { text, context ->
                 if (OnlineTranslationManager.isActive(this)) {
                     val provider = OnlineTranslationManager.provider(this)
-                    OnlineTranslationManager.translate(this, text).fold(
+                    val useContext = context != null && OnlineTranslationManager.isContextAwareEnabled(this)
+                    OnlineTranslationManager.translate(
+                        this, text, contextText = if (useContext) context else null
+                    ).fold(
                         onSuccess = { translated ->
                             Log.d(TAG, "online translate via ${provider.label} succeeded")
                             translated to provider.label
@@ -334,6 +337,8 @@ class OverlayService : Service() {
                     null
                 }
             },
+            contextAwareEnabled = OnlineTranslationManager.isContextAwareEnabled(this) &&
+                OnlineTranslationManager.supportsContext(this),
             scope = serviceScope,
             onCloseRequested = { removeCaptureOverlay() },
             onDefinitionTapped = { detail ->

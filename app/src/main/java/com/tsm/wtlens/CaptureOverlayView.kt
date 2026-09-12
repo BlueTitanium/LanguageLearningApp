@@ -32,7 +32,8 @@ class CaptureOverlayView(
     private val closeButtonCenter: Pair<Float, Float>?,
     private val translationHelper: TranslationHelper,
     private val dictionaryLookup: suspend (String) -> List<DictionaryEntry>,
-    private val onlineTranslate: suspend (String) -> Pair<String, String>?,
+    private val onlineTranslate: suspend (String, String?) -> Pair<String, String>?,
+    private val contextAwareEnabled: Boolean,
     private val scope: CoroutineScope,
     private val onCloseRequested: () -> Unit,
     private val onDefinitionTapped: (WordLookupDetail) -> Unit
@@ -261,7 +262,14 @@ class CaptureOverlayView(
         }
 
         selectedHits = listOf(hit)
-        startTranslation(hit.text, RectF(hit.bounds))
+        // The containing line's full text, if this was a word (not a whole
+        // line) tap - used as DeepL's "context" param in context-aware mode.
+        val contextLine = if (tappedWord != null) {
+            lines.firstOrNull { rectContains(it.bounds, x, y) }?.text?.takeIf { it != hit.text }
+        } else {
+            null
+        }
+        startTranslation(hit.text, RectF(hit.bounds), contextLine)
     }
 
     private fun handleLassoComplete(path: Path) {
@@ -295,20 +303,45 @@ class CaptureOverlayView(
         startTranslation(combinedText, unionBounds)
     }
 
-    private fun startTranslation(text: String, anchor: RectF) {
+    private fun startTranslation(text: String, anchor: RectF, context: String? = null) {
         val id = ++nextSelectionId
         selection = Selection(id, text, anchor, translated = null, loading = true)
         invalidate()
 
+        // Context-aware mode (currently DeepL-only) is opt-in and only
+        // meaningful when there's actual surrounding context to give, so
+        // when active it takes priority over the (context-free) dictionary;
+        // otherwise the dictionary is tried first as usual.
+        val tryOnlineFirst = contextAwareEnabled && context != null
+
         scope.launch {
-            val dictEntries = runCatching { dictionaryLookup(text) }.getOrDefault(emptyList())
+            var dictEntries: List<DictionaryEntry> = emptyList()
             var result: String
             var source: String
-            if (dictEntries.isNotEmpty()) {
+
+            suspend fun tryDictionary(): Boolean {
+                dictEntries = runCatching { dictionaryLookup(text) }.getOrDefault(emptyList())
+                return dictEntries.isNotEmpty()
+            }
+
+            if (tryOnlineFirst) {
+                val online = runCatching { onlineTranslate(text, context) }.getOrNull()
+                if (online != null) {
+                    result = online.first
+                    source = online.second
+                } else if (tryDictionary()) {
+                    result = DictionaryManager.formatEntries(dictEntries)
+                    source = "Dictionary"
+                } else {
+                    result = runCatching { translationHelper.translate(text) }
+                        .getOrElse { "(translation failed)" }
+                    source = "On-device translation"
+                }
+            } else if (tryDictionary()) {
                 result = DictionaryManager.formatEntries(dictEntries)
                 source = "Dictionary"
             } else {
-                val online = runCatching { onlineTranslate(text) }.getOrNull()
+                val online = runCatching { onlineTranslate(text, null) }.getOrNull()
                 if (online != null) {
                     result = online.first
                     source = online.second

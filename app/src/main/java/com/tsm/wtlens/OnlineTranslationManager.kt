@@ -34,6 +34,7 @@ object OnlineTranslationManager {
 
     private const val KEY_PROVIDER = "provider"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_CONTEXT_AWARE = "context_aware_enabled"
     private const val KEY_PAPAGO_CLIENT_ID = "papago_client_id"
     private const val KEY_PAPAGO_CLIENT_SECRET = "papago_client_secret"
     private const val KEY_DEEPL_API_KEY = "deepl_api_key"
@@ -105,11 +106,29 @@ object OnlineTranslationManager {
         isUserEnabled(context) && isConfigured(context) && provider(context) != Provider.NONE
 
     /**
+     * Only DeepL's API has a real "context" parameter (extra text that
+     * influences translation of the main text without itself being
+     * translated or billed) - Papago and Google's basic translate endpoints
+     * have no equivalent. So context-aware mode only does anything when
+     * DeepL is the active provider; it's a no-op otherwise.
+     */
+    fun isContextAwareEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_CONTEXT_AWARE, false)
+
+    fun setContextAwareEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_CONTEXT_AWARE, enabled).apply()
+    }
+
+    fun supportsContext(context: Context): Boolean = provider(context) == Provider.DEEPL
+
+    /**
      * Translates Korean text to English using whichever provider is
      * configured. Returns failure (never throws) so callers can cleanly
-     * fall back to on-device translation.
+     * fall back to on-device translation. [contextText] is extra
+     * surrounding text (e.g. the containing sentence) used to disambiguate
+     * a short [text] like a single word - currently only honored by DeepL.
      */
-    suspend fun translate(context: Context, text: String): Result<String> =
+    suspend fun translate(context: Context, text: String, contextText: String? = null): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
                 when (provider(context)) {
@@ -118,7 +137,7 @@ object OnlineTranslationManager {
                         val (clientId, clientSecret) = papagoCredentials(context)
                         papagoTranslate(clientId, clientSecret, text)
                     }
-                    Provider.DEEPL -> deeplTranslate(deeplApiKey(context), text)
+                    Provider.DEEPL -> deeplTranslate(deeplApiKey(context), text, contextText)
                     Provider.GOOGLE -> googleTranslate(googleApiKey(context), text)
                 }
             }.onFailure { e -> Log.e(TAG, "Online translation failed", e) }
@@ -152,7 +171,7 @@ object OnlineTranslationManager {
         }
     }
 
-    private fun deeplTranslate(apiKey: String, text: String): String {
+    private fun deeplTranslate(apiKey: String, text: String, contextText: String? = null): String {
         val base = if (apiKey.trim().endsWith(":fx")) "https://api-free.deepl.com" else "https://api.deepl.com"
         val url = URL("$base/v2/translate")
         val conn = url.openConnection() as HttpURLConnection
@@ -163,8 +182,12 @@ object OnlineTranslationManager {
         conn.setRequestProperty("Authorization", "DeepL-Auth-Key $apiKey")
         conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
         try {
+            val params = mutableMapOf("text" to text, "source_lang" to "KO", "target_lang" to "EN-US")
+            if (!contextText.isNullOrBlank() && contextText != text) {
+                params["context"] = contextText
+            }
             conn.outputStream.use {
-                it.write(formEncode(mapOf("text" to text, "source_lang" to "KO", "target_lang" to "EN-US")))
+                it.write(formEncode(params))
             }
             checkResponseCode(conn)
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).readText()
