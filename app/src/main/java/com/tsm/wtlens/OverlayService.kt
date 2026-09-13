@@ -275,7 +275,8 @@ class OverlayService : Service() {
                 delay(120)
                 val bitmap = capture.captureFrame(windowManager)
                 val (words, lines) = ocrHelper.recognize(bitmap)
-                showCaptureOverlay(bitmap, words, lines)
+                val learnedWords = computeLearnedWordsSet(words)
+                showCaptureOverlay(bitmap, words, lines, learnedWords)
             } catch (e: Exception) {
                 Log.e(TAG, "capture/OCR failed", e)
                 bubbleView?.visibility = View.VISIBLE
@@ -285,12 +286,25 @@ class OverlayService : Service() {
         }
     }
 
+    /**
+     * Which of [words]' raw OCR text should be highlighted as "learned"
+     * (grey, still tappable) rather than "not learned" (blue) - based on
+     * each word's canonical/dictionary-root form's graduation status in
+     * [VocabManager]. Words never saved at all are treated as not-learned.
+     */
+    private suspend fun computeLearnedWordsSet(words: List<OcrHit>): Set<String> {
+        val canonicalByRaw = words.associate { it.text to DictionaryManager.canonicalForm(it.text) }
+        val learnedMap = VocabManager.learnedStatus(this, canonicalByRaw.values.toSet())
+        return canonicalByRaw.filterValues { learnedMap[it] == true }.keys
+    }
+
     // --- Full-screen capture overlay ------------------------------------
 
     private fun showCaptureOverlay(
         bitmap: android.graphics.Bitmap,
         words: List<OcrHit>,
-        lines: List<OcrHit>
+        lines: List<OcrHit>,
+        learnedWords: Set<String>
     ) {
         bubbleView?.visibility = View.GONE
 
@@ -303,6 +317,7 @@ class OverlayService : Service() {
             screenshot = bitmap,
             words = words,
             lines = lines,
+            learnedWords = learnedWords,
             closeButtonCenter = if (bubbleCenterX != null && bubbleCenterY != null) {
                 bubbleCenterX to bubbleCenterY
             } else {

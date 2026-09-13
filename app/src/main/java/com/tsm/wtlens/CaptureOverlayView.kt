@@ -32,6 +32,7 @@ class CaptureOverlayView(
     private val screenshot: Bitmap,
     private val words: List<OcrHit>,
     private val lines: List<OcrHit>,
+    private val learnedWords: Set<String>,
     private val closeButtonCenter: Pair<Float, Float>?,
     private val translationHelper: TranslationHelper,
     private val dictionaryLookup: suspend (String) -> List<DictionaryEntry>,
@@ -57,8 +58,14 @@ class CaptureOverlayView(
     private var selectedHits: List<OcrHit> = emptyList()
     private var nextSelectionId = 0
 
-    private val wordBoxPaint = Paint().apply {
-        color = Color.argb(60, 255, 235, 59)
+    // Not-yet-learned words (never saved, or saved but not graduated).
+    private val notLearnedPaint = Paint().apply {
+        color = Color.argb(70, 33, 150, 243)
+        style = Paint.Style.FILL
+    }
+    // Learned/graduated words - subdued but still visibly tappable.
+    private val learnedPaint = Paint().apply {
+        color = Color.argb(55, 158, 158, 158)
         style = Paint.Style.FILL
     }
     private val lineBoxPaint = Paint().apply {
@@ -66,8 +73,9 @@ class CaptureOverlayView(
         style = Paint.Style.STROKE
         strokeWidth = 3f
     }
+    // The word(s) just tapped/circled.
     private val selectedFillPaint = Paint().apply {
-        color = Color.argb(110, 255, 87, 34)
+        color = Color.argb(140, 255, 235, 59)
         style = Paint.Style.FILL
     }
     private val lassoStrokePaint = Paint().apply {
@@ -157,7 +165,8 @@ class CaptureOverlayView(
             canvas.drawRect(line.bounds, lineBoxPaint)
         }
         for (word in words) {
-            canvas.drawRect(word.bounds, wordBoxPaint)
+            val paint = if (learnedWords.contains(word.text)) learnedPaint else notLearnedPaint
+            canvas.drawRect(word.bounds, paint)
         }
         for (hit in selectedHits) {
             canvas.drawRect(hit.bounds, selectedFillPaint)
