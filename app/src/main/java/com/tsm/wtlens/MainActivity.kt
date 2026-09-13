@@ -62,6 +62,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var onlineStatusText: TextView
     private lateinit var onlineTestButton: Button
 
+    private lateinit var vocabStatsText: TextView
+    private lateinit var vocabGraduationText: TextView
+    private lateinit var vocabReviewButton: Button
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -196,6 +200,9 @@ class MainActivity : AppCompatActivity() {
         )
         buildOnlineTranslationSection(online)
 
+        val vocabCategory = addCollapsible(root, "Vocabulary", initiallyExpanded = false)
+        buildVocabularySection(vocabCategory)
+
         val startButton = Button(this).apply {
             text = "2. Start WebtoonLens bubble"
             setOnClickListener { startOverlay() }
@@ -218,6 +225,7 @@ class MainActivity : AppCompatActivity() {
         refreshStatus()
         refreshDictionaryUi()
         refreshOnlineUi()
+        refreshVocabUi()
     }
 
     override fun onDestroy() {
@@ -475,6 +483,59 @@ class MainActivity : AppCompatActivity() {
                 onSuccess = { onlineStatusText.text = "Test succeeded: \"안녕하세요\" → \"$it\"" },
                 onFailure = { onlineStatusText.text = "Test failed: ${it.message}" }
             )
+        }
+    }
+
+    private fun buildVocabularySection(container: LinearLayout) {
+        container.addView(TextView(this).apply {
+            text = "Words you save (via the 🔖 button when looking one up) collect here for " +
+                "spaced-repetition review, Anki-style. Not-yet-learned words are highlighted " +
+                "blue while reading; once graduated they turn grey (still tappable, just " +
+                "de-emphasized)."
+            setPadding(0, 0, 0, 8)
+        })
+
+        vocabStatsText = TextView(this)
+        container.addView(vocabStatsText)
+
+        vocabReviewButton = Button(this).apply {
+            text = "Review now"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, VocabReviewActivity::class.java))
+            }
+        }
+        container.addView(vocabReviewButton)
+
+        container.addView(sectionLabel("Graduation threshold"))
+        vocabGraduationText = TextView(this)
+        container.addView(vocabGraduationText)
+        container.addView(SeekBar(this).apply {
+            max = 89 // 1..90 days
+            progress = VocabManager.graduationDays(this@MainActivity) - 1
+            updateGraduationLabel(VocabManager.graduationDays(this@MainActivity))
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val days = progress + 1
+                    updateGraduationLabel(days)
+                    if (fromUser) VocabManager.setGraduationDays(this@MainActivity, days)
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        })
+
+        refreshVocabUi()
+    }
+
+    private fun updateGraduationLabel(days: Int) {
+        vocabGraduationText.text = "A word is \"learned\" once its review interval reaches $days day(s)."
+    }
+
+    private fun refreshVocabUi() {
+        activityScope.launch {
+            val (total, learned, due) = VocabManager.stats(this@MainActivity)
+            vocabStatsText.text = "$total saved · $learned learned · $due due for review"
+            vocabReviewButton.isEnabled = due > 0
         }
     }
 
