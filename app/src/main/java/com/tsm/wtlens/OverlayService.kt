@@ -298,6 +298,14 @@ class OverlayService : Service() {
         return canonicalByRaw.filterValues { learnedMap[it] == true }.keys
     }
 
+    private fun saveVocabWord(word: String, hanja: String?, gloss: String, source: String) {
+        serviceScope.launch {
+            val canonical = DictionaryManager.canonicalForm(word)
+            VocabManager.save(this@OverlayService, canonical, hanja, gloss, source)
+            Log.d(TAG, "saved to vocab: '$word' as '$canonical'")
+        }
+    }
+
     // --- Full-screen capture overlay ------------------------------------
 
     private fun showCaptureOverlay(
@@ -369,7 +377,8 @@ class OverlayService : Service() {
                     showWordDetail(detail.copy(breakdown = breakdown, conjugationRoot = conjugationRoot))
                 }
             },
-            onSpeak = { text -> ttsHelper.speak(text) }
+            onSpeak = { text -> ttsHelper.speak(text) },
+            onSaveVocab = { word, hanja, gloss, source -> saveVocabWord(word, hanja, gloss, source) }
         )
 
         val params = WindowManager.LayoutParams(
@@ -420,7 +429,8 @@ class OverlayService : Service() {
         val view = WordDetailView(
             this, detail,
             onDismiss = { removeWordDetail() },
-            onSpeak = { text -> ttsHelper.speak(text) }
+            onSpeak = { text -> ttsHelper.speak(text) },
+            onSaveVocab = { word, hanja, gloss, source -> saveVocabWord(word, hanja, gloss, source) }
         )
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,

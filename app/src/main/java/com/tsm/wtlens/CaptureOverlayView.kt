@@ -41,7 +41,8 @@ class CaptureOverlayView(
     private val scope: CoroutineScope,
     private val onCloseRequested: () -> Unit,
     private val onDefinitionTapped: (WordLookupDetail) -> Unit,
-    private val onSpeak: (String) -> Unit
+    private val onSpeak: (String) -> Unit,
+    private val onSaveVocab: (word: String, hanja: String?, gloss: String, source: String) -> Unit
 ) : View(context) {
 
     private data class Selection(
@@ -51,7 +52,9 @@ class CaptureOverlayView(
         var translated: String?,
         var loading: Boolean,
         var source: String? = null,
-        var dictEntries: List<DictionaryEntry> = emptyList()
+        var dictEntries: List<DictionaryEntry> = emptyList(),
+        val isSingleWord: Boolean,
+        var saved: Boolean = false
     )
 
     private var selection: Selection? = null
@@ -135,6 +138,7 @@ class CaptureOverlayView(
     private val closeButtonRect = RectF()
     private var lastPopupBox: RectF? = null
     private var speakerIconRect: RectF? = null
+    private var saveIconRect: RectF? = null
 
     // --- Drag/lasso tracking --------------------------------------------
     private var dragPath: Path? = null
@@ -191,6 +195,7 @@ class CaptureOverlayView(
         } else {
             lastPopupBox = null
             speakerIconRect = null
+            saveIconRect = null
         }
     }
 
@@ -223,9 +228,11 @@ class CaptureOverlayView(
         val original = sel.text
         val translated = if (sel.loading) "Translating…" else (sel.translated ?: "")
         val sourceLabel = sel.source?.takeIf { !sel.loading }?.let { "$it · tap for more" }
+        val showSaveIcon = sel.isSingleWord && !sel.loading
+        val iconCount = if (showSaveIcon) 2 else 1
 
         val maxBoxWidth = width - 40f
-        val maxTextWidth = (maxBoxWidth - paddingH * 2 - speakerReserve).toInt()
+        val maxTextWidth = (maxBoxWidth - paddingH * 2 - speakerReserve * iconCount).toInt()
 
         val originalLayout = buildLayout(original, popupOriginalPaint, maxTextWidth, maxLines = 3)
         val translatedLayout = buildLayout(translated, popupTranslatedPaint, maxTextWidth, maxLines = 8)
@@ -234,7 +241,7 @@ class CaptureOverlayView(
         val neededContentWidth = maxOf(
             maxLineWidth(originalLayout), maxLineWidth(translatedLayout), sourceWidth
         )
-        val boxWidth = (neededContentWidth + paddingH * 2 + speakerReserve)
+        val boxWidth = (neededContentWidth + paddingH * 2 + speakerReserve * iconCount)
             .coerceAtMost(maxBoxWidth)
             .coerceAtLeast(160f)
 
@@ -273,6 +280,21 @@ class CaptureOverlayView(
             "🔊", speakerRect.centerX(), speakerRect.centerY() + 10f, speakerIconTextPaint
         )
         speakerIconRect = speakerRect
+
+        if (showSaveIcon) {
+            val saveRect = RectF(
+                speakerRect.left - speakerSize - 8f, box.top + 12f,
+                speakerRect.left - 8f, box.top + 12f + speakerSize
+            )
+            canvas.drawRoundRect(saveRect, 14f, 14f, speakerIconBgPaint)
+            canvas.drawText(
+                if (sel.saved) "✓" else "🔖",
+                saveRect.centerX(), saveRect.centerY() + 10f, speakerIconTextPaint
+            )
+            saveIconRect = saveRect
+        } else {
+            saveIconRect = null
+        }
 
         // Only tappable-for-detail once it's done loading (nothing to expand into yet otherwise).
         lastPopupBox = if (!sel.loading) box else null
@@ -323,6 +345,16 @@ class CaptureOverlayView(
             return
         }
 
+        val saveRect = saveIconRect
+        if (sel != null && saveRect != null && saveRect.contains(x, y) && !sel.saved) {
+            val hanja = sel.dictEntries.firstOrNull()?.hanja
+            val gloss = sel.translated ?: ""
+            onSaveVocab(sel.text, hanja, gloss, sel.source ?: "Translation")
+            selection = sel.copy(saved = true)
+            invalidate()
+            return
+        }
+
         val popupBox = lastPopupBox
         if (sel != null && popupBox != null && popupBox.contains(x, y)) {
             onDefinitionTapped(
@@ -354,7 +386,7 @@ class CaptureOverlayView(
         } else {
             null
         }
-        startTranslation(hit.text, RectF(hit.bounds), contextLine)
+        startTranslation(hit.text, RectF(hit.bounds), contextLine, isSingleWord = true)
     }
 
     private fun handleLassoComplete(path: Path) {
@@ -385,12 +417,17 @@ class CaptureOverlayView(
         for (hit in sorted.drop(1)) unionBounds.union(RectF(hit.bounds))
 
         selectedHits = sorted
-        startTranslation(combinedText, unionBounds)
+        startTranslation(combinedText, unionBounds, isSingleWord = false)
     }
 
-    private fun startTranslation(text: String, anchor: RectF, context: String? = null) {
+    private fun startTranslation(
+        text: String,
+        anchor: RectF,
+        context: String? = null,
+        isSingleWord: Boolean
+    ) {
         val id = ++nextSelectionId
-        selection = Selection(id, text, anchor, translated = null, loading = true)
+        selection = Selection(id, text, anchor, translated = null, loading = true, isSingleWord = isSingleWord)
         invalidate()
 
         // Context-aware mode (currently DeepL-only) is opt-in and only

@@ -45,7 +45,8 @@ class WordDetailView(
     context: Context,
     detail: WordLookupDetail,
     private val onDismiss: () -> Unit,
-    private val onSpeak: (String) -> Unit
+    private val onSpeak: (String) -> Unit,
+    private val onSaveVocab: (word: String, hanja: String?, gloss: String, source: String) -> Unit
 ) : FrameLayout(context) {
 
     init {
@@ -84,6 +85,19 @@ class WordDetailView(
                 setPadding(dp(12), 0, dp(12), 0)
                 setOnClickListener { onSpeak(detail.original) }
             })
+            if (detail.words.size <= 1) {
+                addView(Button(context).apply {
+                    text = "🔖 Save"
+                    setPadding(dp(12), 0, dp(12), 0)
+                    setOnClickListener {
+                        val hanja = detail.entries.firstOrNull()?.hanja
+                        val gloss = detail.entries.firstOrNull()?.gloss ?: detail.fallbackTranslation
+                        onSaveVocab(detail.original, hanja, gloss, detail.sourceLabel)
+                        text = "✓ Saved"
+                        isEnabled = false
+                    }
+                })
+            }
         })
 
         if (detail.breakdown.isNotEmpty()) {
