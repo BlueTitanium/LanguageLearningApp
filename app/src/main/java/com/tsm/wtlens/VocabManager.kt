@@ -9,6 +9,9 @@ import kotlinx.coroutines.withContext
 
 enum class ReviewRating { AGAIN, HARD, GOOD, EASY }
 
+/** A word's vocab status, for on-screen highlighting. */
+enum class WordVocabStatus { NOT_SAVED, IN_PROGRESS, LEARNED }
+
 data class VocabEntry(
     val id: Long,
     val surface: String,
@@ -164,6 +167,27 @@ object VocabManager {
             arrayOf(System.currentTimeMillis().toString(), limit.toString())
         ).use { c -> while (c.moveToNext()) entries += rowToEntry(c) }
         entries
+    }
+
+    /** Every saved word, most recently added first. */
+    suspend fun allEntries(context: Context): List<VocabEntry> = withContext(Dispatchers.IO) {
+        val entries = mutableListOf<VocabEntry>()
+        openDb(context).rawQuery("SELECT * FROM vocab ORDER BY added_at DESC", null)
+            .use { c -> while (c.moveToNext()) entries += rowToEntry(c) }
+        entries
+    }
+
+    suspend fun delete(context: Context, id: Long) {
+        withContext(Dispatchers.IO) {
+            openDb(context).delete("vocab", "id = ?", arrayOf(id.toString()))
+        }
+    }
+
+    suspend fun updateGloss(context: Context, id: Long, gloss: String) {
+        withContext(Dispatchers.IO) {
+            val values = ContentValues().apply { put("gloss", gloss) }
+            openDb(context).update("vocab", values, "id = ?", arrayOf(id.toString()))
+        }
     }
 
     suspend fun recordReview(context: Context, entry: VocabEntry, rating: ReviewRating) {

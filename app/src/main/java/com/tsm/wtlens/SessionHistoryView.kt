@@ -34,7 +34,8 @@ class SessionHistoryView(
     context: Context,
     entries: List<SessionHistoryEntry>,
     learnedByWord: Map<String, Boolean>,
-    private val onDismiss: () -> Unit
+    private val onDismiss: () -> Unit,
+    private val onCopyRequested: (String) -> Unit
 ) : FrameLayout(context) {
 
     init {
@@ -56,13 +57,27 @@ class SessionHistoryView(
             isClickable = true
         }
 
-        card.addView(TextView(context).apply {
-            text = "Session history"
-            setTextColor(Color.WHITE)
-            textSize = 20f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, 0, 0, dp(12))
-        })
+        card.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(context).apply {
+                text = "Session history"
+                setTextColor(Color.WHITE)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            if (entries.isNotEmpty()) {
+                addView(Button(context).apply {
+                    text = "📋 Copy all"
+                    setPadding(dp(12), 0, dp(12), 0)
+                    setOnClickListener {
+                        val text = entries.joinToString("\n") { it.original }
+                        onCopyRequested(text)
+                    }
+                })
+            }
+        }.apply { setPadding(0, 0, 0, dp(12)) })
 
         if (entries.isEmpty()) {
             card.addView(TextView(context).apply {
@@ -122,7 +137,7 @@ class SessionHistoryView(
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(if (learned) Color.rgb(158, 158, 158) else Color.rgb(33, 150, 243))
+                    setColor(if (learned) Color.rgb(158, 158, 158) else Color.rgb(156, 39, 176))
                 }
             })
         }

@@ -45,8 +45,7 @@ class WordDetailView(
     context: Context,
     detail: WordLookupDetail,
     private val onDismiss: () -> Unit,
-    private val onSpeak: (String) -> Unit,
-    private val onSaveVocab: (word: String, hanja: String?, gloss: String, source: String) -> Unit
+    private val onSpeak: (String) -> Unit
 ) : FrameLayout(context) {
 
     init {
@@ -57,6 +56,12 @@ class WordDetailView(
 
         val density = resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
+
+        // Prefer KOMORAN's linguistically-derived root; fall back to
+        // whichever dictionary entry surface actually matched (may differ
+        // slightly, e.g. via the old suffix-stripping heuristic).
+        val displayRoot = (detail.conjugationRoot ?: detail.entries.firstOrNull()?.surface)
+            ?.takeIf { it != detail.original }
 
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -85,19 +90,6 @@ class WordDetailView(
                 setPadding(dp(12), 0, dp(12), 0)
                 setOnClickListener { onSpeak(detail.original) }
             })
-            if (detail.words.size <= 1) {
-                addView(Button(context).apply {
-                    text = "🔖 Save"
-                    setPadding(dp(12), 0, dp(12), 0)
-                    setOnClickListener {
-                        val hanja = detail.entries.firstOrNull()?.hanja
-                        val gloss = detail.entries.firstOrNull()?.gloss ?: detail.fallbackTranslation
-                        onSaveVocab(detail.original, hanja, gloss, detail.sourceLabel)
-                        text = "✓ Saved"
-                        isEnabled = false
-                    }
-                })
-            }
         })
 
         if (detail.breakdown.isNotEmpty()) {
@@ -118,12 +110,6 @@ class WordDetailView(
             }
             card.addView(divider(dp(1), dp(14)))
         }
-
-        // Prefer KOMORAN's linguistically-derived root; fall back to
-        // whichever dictionary entry surface actually matched (may differ
-        // slightly, e.g. via the old suffix-stripping heuristic).
-        val displayRoot = (detail.conjugationRoot ?: detail.entries.firstOrNull()?.surface)
-            ?.takeIf { it != detail.original }
 
         if (displayRoot != null) {
             card.addView(TextView(context).apply {

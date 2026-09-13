@@ -277,4 +277,8 @@ object DictionaryManager {
 
     fun formatEntries(entries: List<DictionaryEntry>): String =
         entries.take(3).joinToString("; ") { it.gloss }
+
+    /** All senses (uncapped, up to 10), for saving to vocab - not just the top few shown in the popup. */
+    fun formatEntriesFull(entries: List<DictionaryEntry>): String =
+        entries.take(10).joinToString("; ") { it.gloss }
 }

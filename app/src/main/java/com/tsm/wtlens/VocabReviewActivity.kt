@@ -64,6 +64,7 @@ class VocabReviewActivity : AppCompatActivity() {
             setTypeface(typeface, Typeface.BOLD)
             setPadding(0, 64, 0, 32)
             gravity = Gravity.CENTER
+            setTextIsSelectable(true)
         }
         root.addView(wordText)
 
@@ -72,12 +73,23 @@ class VocabReviewActivity : AppCompatActivity() {
             setOnClickListener { currentEntry?.let { ttsHelper.speak(it.surface) } }
         })
 
+        root.addView(Button(this).apply {
+            text = "📋 Copy"
+            setOnClickListener {
+                val entry = currentEntry ?: return@setOnClickListener
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("WebtoonLens", entry.surface)
+                )
+            }
+        })
+
         backContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
             setPadding(0, 32, 0, 32)
         }
-        glossText = TextView(this).apply { textSize = 20f }
+        glossText = TextView(this).apply { textSize = 20f; setTextIsSelectable(true) }
         backContainer.addView(glossText)
         sourceText = TextView(this).apply { textSize = 12f; alpha = 0.6f; setPadding(0, 8, 0, 0) }
         backContainer.addView(sourceText)

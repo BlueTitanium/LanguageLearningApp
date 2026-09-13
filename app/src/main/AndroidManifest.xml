@@ -32,6 +32,10 @@
             android:name=".VocabReviewActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".VocabBrowseActivity"
+            android:exported="false" />
+
         <service
             android:name=".OverlayService"
             android:exported="false"

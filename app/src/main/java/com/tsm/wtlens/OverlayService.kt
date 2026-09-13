@@ -293,8 +293,8 @@ class OverlayService : Service() {
                 delay(120)
                 val bitmap = capture.captureFrame(windowManager)
                 val (words, lines) = ocrHelper.recognize(bitmap)
-                val learnedWords = computeLearnedWordsSet(words)
-                showCaptureOverlay(bitmap, words, lines, learnedWords)
+                val wordStatus = computeWordVocabStatus(words)
+                showCaptureOverlay(bitmap, words, lines, wordStatus)
             } catch (e: Exception) {
                 Log.e(TAG, "capture/OCR failed", e)
                 bubbleView?.visibility = View.VISIBLE
@@ -305,20 +305,37 @@ class OverlayService : Service() {
     }
 
     /**
-     * Which of [words]' raw OCR text should be highlighted as "learned"
-     * (grey, still tappable) rather than "not learned" (blue) - based on
-     * each word's canonical/dictionary-root form's graduation status in
-     * [VocabManager]. Words never saved at all are treated as not-learned.
+     * Each of [words]' raw OCR text, classified by its canonical/dictionary-
+     * root form's status in [VocabManager]: never saved, saved but still
+     * being reviewed, or learned/graduated. Drives the blue/purple/grey
+     * on-screen highlighting.
      */
-    private suspend fun computeLearnedWordsSet(words: List<OcrHit>): Set<String> {
+    private suspend fun computeWordVocabStatus(words: List<OcrHit>): Map<String, WordVocabStatus> {
         val canonicalByRaw = words.associate { it.text to DictionaryManager.canonicalForm(it.text) }
         val learnedMap = VocabManager.learnedStatus(this, canonicalByRaw.values.toSet())
-        return canonicalByRaw.filterValues { learnedMap[it] == true }.keys
+        return canonicalByRaw.mapValues { (_, canonical) ->
+            when {
+                !learnedMap.containsKey(canonical) -> WordVocabStatus.NOT_SAVED
+                learnedMap[canonical] == true -> WordVocabStatus.LEARNED
+                else -> WordVocabStatus.IN_PROGRESS
+            }
+        }
     }
 
-    private fun saveVocabWord(word: String, hanja: String?, gloss: String, source: String) {
+    private fun copyToClipboard(text: String) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("WebtoonLens", text))
+    }
+
+    private fun saveVocabWord(word: String, dictEntries: List<DictionaryEntry>, fallbackGloss: String, source: String) {
         serviceScope.launch {
             val canonical = DictionaryManager.canonicalForm(word)
+            val hanja = dictEntries.firstOrNull()?.hanja
+            val gloss = if (dictEntries.isNotEmpty()) {
+                DictionaryManager.formatEntriesFull(dictEntries)
+            } else {
+                fallbackGloss
+            }
             VocabManager.save(this@OverlayService, canonical, hanja, gloss, source)
             Log.d(TAG, "saved to vocab: '$word' as '$canonical'")
         }
@@ -330,7 +347,7 @@ class OverlayService : Service() {
         bitmap: android.graphics.Bitmap,
         words: List<OcrHit>,
         lines: List<OcrHit>,
-        learnedWords: Set<String>
+        wordStatus: Map<String, WordVocabStatus>
     ) {
         bubbleView?.visibility = View.GONE
 
@@ -343,7 +360,7 @@ class OverlayService : Service() {
             screenshot = bitmap,
             words = words,
             lines = lines,
-            learnedWords = learnedWords,
+            wordStatus = wordStatus,
             closeButtonCenter = if (bubbleCenterX != null && bubbleCenterY != null) {
                 bubbleCenterX to bubbleCenterY
             } else {
@@ -396,12 +413,21 @@ class OverlayService : Service() {
                 }
             },
             onSpeak = { text -> ttsHelper.speak(text) },
-            onSaveVocab = { word, hanja, gloss, source -> saveVocabWord(word, hanja, gloss, source) },
-            onLookupCompleted = { word, translated, source, isSingleWord ->
+            onLookupCompleted = { word, translated, source, isSingleWord, dictEntries ->
+                // Re-looking-up the same word/phrase again replaces its old
+                // entry (moving it to "most recent") rather than piling up
+                // duplicate rows.
+                sessionHistory.removeAll { it.original == word }
                 sessionHistory.add(
                     SessionHistoryEntry(word, translated, source, System.currentTimeMillis(), isSingleWord)
                 )
-            }
+                // Single-word lookups auto-save to vocab (no manual button anymore) -
+                // VocabManager.save is a no-op if this canonical form is already saved.
+                if (isSingleWord) {
+                    saveVocabWord(word, dictEntries, translated, source)
+                }
+            },
+            onCopyRequested = { text -> copyToClipboard(text) }
         )
 
         val params = WindowManager.LayoutParams(
@@ -452,8 +478,7 @@ class OverlayService : Service() {
         val view = WordDetailView(
             this, detail,
             onDismiss = { removeWordDetail() },
-            onSpeak = { text -> ttsHelper.speak(text) },
-            onSaveVocab = { word, hanja, gloss, source -> saveVocabWord(word, hanja, gloss, source) }
+            onSpeak = { text -> ttsHelper.speak(text) }
         )
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -486,7 +511,8 @@ class OverlayService : Service() {
                 this@OverlayService,
                 entries = sessionHistory.toList(),
                 learnedByWord = learnedByWord,
-                onDismiss = { removeSessionHistory() }
+                onDismiss = { removeSessionHistory() },
+                onCopyRequested = { text -> copyToClipboard(text) }
             )
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,

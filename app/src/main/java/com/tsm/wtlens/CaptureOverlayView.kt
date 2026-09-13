@@ -32,7 +32,7 @@ class CaptureOverlayView(
     private val screenshot: Bitmap,
     private val words: List<OcrHit>,
     private val lines: List<OcrHit>,
-    private val learnedWords: Set<String>,
+    private val wordStatus: Map<String, WordVocabStatus>,
     private val closeButtonCenter: Pair<Float, Float>?,
     private val translationHelper: TranslationHelper,
     private val dictionaryLookup: suspend (String) -> List<DictionaryEntry>,
@@ -42,8 +42,14 @@ class CaptureOverlayView(
     private val onCloseRequested: () -> Unit,
     private val onDefinitionTapped: (WordLookupDetail) -> Unit,
     private val onSpeak: (String) -> Unit,
-    private val onSaveVocab: (word: String, hanja: String?, gloss: String, source: String) -> Unit,
-    private val onLookupCompleted: (word: String, translated: String, source: String, isSingleWord: Boolean) -> Unit
+    private val onLookupCompleted: (
+        word: String,
+        translated: String,
+        source: String,
+        isSingleWord: Boolean,
+        dictEntries: List<DictionaryEntry>
+    ) -> Unit,
+    private val onCopyRequested: (String) -> Unit
 ) : View(context) {
 
     private data class Selection(
@@ -54,17 +60,26 @@ class CaptureOverlayView(
         var loading: Boolean,
         var source: String? = null,
         var dictEntries: List<DictionaryEntry> = emptyList(),
-        val isSingleWord: Boolean,
-        var saved: Boolean = false
+        val isSingleWord: Boolean
     )
 
     private var selection: Selection? = null
     private var selectedHits: List<OcrHit> = emptyList()
     private var nextSelectionId = 0
 
-    // Not-yet-learned words (never saved, or saved but not graduated).
-    private val notLearnedPaint = Paint().apply {
+    // Every word tapped/circled at any point during this capture - stays
+    // yellow even after moving on to a different word, so you can see what
+    // you've already looked at on this screen.
+    private val everTappedWords = mutableSetOf<String>()
+
+    // Never saved to vocab at all.
+    private val notSavedPaint = Paint().apply {
         color = Color.argb(70, 33, 150, 243)
+        style = Paint.Style.FILL
+    }
+    // Saved to vocab, still being reviewed (not yet graduated).
+    private val inProgressPaint = Paint().apply {
+        color = Color.argb(75, 156, 39, 176)
         style = Paint.Style.FILL
     }
     // Learned/graduated words - subdued but still visibly tappable.
@@ -79,7 +94,7 @@ class CaptureOverlayView(
     }
     // The word(s) just tapped/circled.
     private val selectedFillPaint = Paint().apply {
-        color = Color.argb(140, 255, 235, 59)
+        color = Color.argb(190, 255, 235, 59)
         style = Paint.Style.FILL
     }
     private val lassoStrokePaint = Paint().apply {
@@ -139,7 +154,6 @@ class CaptureOverlayView(
     private val closeButtonRect = RectF()
     private var lastPopupBox: RectF? = null
     private var speakerIconRect: RectF? = null
-    private var saveIconRect: RectF? = null
 
     // --- Drag/lasso tracking --------------------------------------------
     private var dragPath: Path? = null
@@ -170,11 +184,16 @@ class CaptureOverlayView(
             canvas.drawRect(line.bounds, lineBoxPaint)
         }
         for (word in words) {
-            val paint = if (learnedWords.contains(word.text)) learnedPaint else notLearnedPaint
+            if (word.text in everTappedWords) continue // drawn yellow below instead, not blended
+            val paint = when (wordStatus[word.text] ?: WordVocabStatus.NOT_SAVED) {
+                WordVocabStatus.LEARNED -> learnedPaint
+                WordVocabStatus.IN_PROGRESS -> inProgressPaint
+                WordVocabStatus.NOT_SAVED -> notSavedPaint
+            }
             canvas.drawRect(word.bounds, paint)
         }
-        for (hit in selectedHits) {
-            canvas.drawRect(hit.bounds, selectedFillPaint)
+        for (word in words) {
+            if (word.text in everTappedWords) canvas.drawRect(word.bounds, selectedFillPaint)
         }
 
         dragPath?.let { path ->
@@ -196,7 +215,6 @@ class CaptureOverlayView(
         } else {
             lastPopupBox = null
             speakerIconRect = null
-            saveIconRect = null
         }
     }
 
@@ -228,12 +246,10 @@ class CaptureOverlayView(
 
         val original = sel.text
         val translated = if (sel.loading) "Translating…" else (sel.translated ?: "")
-        val sourceLabel = sel.source?.takeIf { !sel.loading }?.let { "$it · tap for more" }
-        val showSaveIcon = sel.isSingleWord && !sel.loading
-        val iconCount = if (showSaveIcon) 2 else 1
+        val sourceLabel = sel.source?.takeIf { !sel.loading }?.let { "$it · tap: details · hold: copy" }
 
         val maxBoxWidth = width - 40f
-        val maxTextWidth = (maxBoxWidth - paddingH * 2 - speakerReserve * iconCount).toInt()
+        val maxTextWidth = (maxBoxWidth - paddingH * 2 - speakerReserve).toInt()
 
         val originalLayout = buildLayout(original, popupOriginalPaint, maxTextWidth, maxLines = 3)
         val translatedLayout = buildLayout(translated, popupTranslatedPaint, maxTextWidth, maxLines = 8)
@@ -242,7 +258,7 @@ class CaptureOverlayView(
         val neededContentWidth = maxOf(
             maxLineWidth(originalLayout), maxLineWidth(translatedLayout), sourceWidth
         )
-        val boxWidth = (neededContentWidth + paddingH * 2 + speakerReserve * iconCount)
+        val boxWidth = (neededContentWidth + paddingH * 2 + speakerReserve)
             .coerceAtMost(maxBoxWidth)
             .coerceAtLeast(160f)
 
@@ -282,21 +298,6 @@ class CaptureOverlayView(
         )
         speakerIconRect = speakerRect
 
-        if (showSaveIcon) {
-            val saveRect = RectF(
-                speakerRect.left - speakerSize - 8f, box.top + 12f,
-                speakerRect.left - 8f, box.top + 12f + speakerSize
-            )
-            canvas.drawRoundRect(saveRect, 14f, 14f, speakerIconBgPaint)
-            canvas.drawText(
-                if (sel.saved) "✓" else "🔖",
-                saveRect.centerX(), saveRect.centerY() + 10f, speakerIconTextPaint
-            )
-            saveIconRect = saveRect
-        } else {
-            saveIconRect = null
-        }
-
         // Only tappable-for-detail once it's done loading (nothing to expand into yet otherwise).
         lastPopupBox = if (!sel.loading) box else null
     }
@@ -324,7 +325,8 @@ class CaptureOverlayView(
                 if (dragMoved && path != null) {
                     handleLassoComplete(path)
                 } else {
-                    handleTap(event.x, event.y)
+                    val isLongPress = (event.eventTime - event.downTime) >= 450
+                    handleTap(event.x, event.y, isLongPress)
                 }
                 invalidate()
                 return true
@@ -333,7 +335,7 @@ class CaptureOverlayView(
         return true
     }
 
-    private fun handleTap(x: Float, y: Float) {
+    private fun handleTap(x: Float, y: Float, isLongPress: Boolean = false) {
         if (closeButtonRect.contains(x, y)) {
             onCloseRequested()
             return
@@ -346,17 +348,11 @@ class CaptureOverlayView(
             return
         }
 
-        val saveRect = saveIconRect
-        if (sel != null && saveRect != null && saveRect.contains(x, y) && !sel.saved) {
-            val hanja = sel.dictEntries.firstOrNull()?.hanja
-            val gloss = sel.translated ?: ""
-            onSaveVocab(sel.text, hanja, gloss, sel.source ?: "Translation")
-            selection = sel.copy(saved = true)
-            invalidate()
+        val popupBox = lastPopupBox
+        if (sel != null && popupBox != null && popupBox.contains(x, y) && isLongPress) {
+            onCopyRequested(sel.text)
             return
         }
-
-        val popupBox = lastPopupBox
         if (sel != null && popupBox != null && popupBox.contains(x, y)) {
             onDefinitionTapped(
                 WordLookupDetail(
@@ -379,7 +375,15 @@ class CaptureOverlayView(
             return
         }
 
+        // Re-tapping the word that's already selected/showing shouldn't
+        // restart the lookup (wasteful, and was spamming duplicate session
+        // history entries).
+        if (selectedHits.size == 1 && selectedHits[0] === hit) {
+            return
+        }
+
         selectedHits = listOf(hit)
+        everTappedWords.add(hit.text)
         // The containing line's full text, if this was a word (not a whole
         // line) tap - used as DeepL's "context" param in context-aware mode.
         val contextLine = if (tappedWord != null) {
@@ -418,6 +422,7 @@ class CaptureOverlayView(
         for (hit in sorted.drop(1)) unionBounds.union(RectF(hit.bounds))
 
         selectedHits = sorted
+        everTappedWords.addAll(sorted.map { it.text })
         startTranslation(combinedText, unionBounds, isSingleWord = false)
     }
 
@@ -480,7 +485,7 @@ class CaptureOverlayView(
                 )
                 invalidate()
             }
-            onLookupCompleted(text, result, source, isSingleWord)
+            onLookupCompleted(text, result, source, isSingleWord, dictEntries)
         }
     }
 

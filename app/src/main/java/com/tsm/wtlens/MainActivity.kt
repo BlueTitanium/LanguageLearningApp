@@ -488,10 +488,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildVocabularySection(container: LinearLayout) {
         container.addView(TextView(this).apply {
-            text = "Words you save (via the 🔖 button when looking one up) collect here for " +
-                "spaced-repetition review, Anki-style. Not-yet-learned words are highlighted " +
-                "blue while reading; once graduated they turn grey (still tappable, just " +
-                "de-emphasized)."
+            text = "Every single word you look up while reading is saved here automatically " +
+                "for spaced-repetition review, Anki-style. Not-yet-learned words are " +
+                "highlighted blue while reading; once graduated they turn grey (still " +
+                "tappable, just de-emphasized)."
             setPadding(0, 0, 0, 8)
         })
 
@@ -505,6 +505,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
         container.addView(vocabReviewButton)
+
+        container.addView(Button(this).apply {
+            text = "Browse saved words"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, VocabBrowseActivity::class.java))
+            }
+        })
 
         container.addView(sectionLabel("Graduation threshold"))
         vocabGraduationText = TextView(this)
