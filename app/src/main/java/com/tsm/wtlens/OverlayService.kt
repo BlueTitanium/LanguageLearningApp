@@ -43,7 +43,11 @@ class OverlayService : Service() {
     private var bubbleView: View? = null
     private var captureOverlayView: CaptureOverlayView? = null
     private var wordDetailView: WordDetailView? = null
+    private var sessionHistoryView: SessionHistoryView? = null
     private var isCapturing = false
+
+    // Everything looked up since this service (i.e. this bubble session) started.
+    private val sessionHistory = mutableListOf<SessionHistoryEntry>()
 
     override fun onCreate() {
         super.onCreate()
@@ -203,6 +207,12 @@ class OverlayService : Service() {
         var startX = 0
         var startY = 0
         var moved = false
+        var longPressFired = false
+        val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val longPressRunnable = Runnable {
+            longPressFired = true
+            showSessionHistory()
+        }
 
         bubble.setOnTouchListener { view, event ->
             when (event.action) {
@@ -212,19 +222,27 @@ class OverlayService : Service() {
                     startX = params.x
                     startY = params.y
                     moved = false
+                    longPressFired = false
+                    longPressHandler.postDelayed(longPressRunnable, 500)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - downX).toInt()
                     val dy = (event.rawY - downY).toInt()
-                    if (abs(dx) > 12 || abs(dy) > 12) moved = true
+                    if (abs(dx) > 12 || abs(dy) > 12) {
+                        moved = true
+                        longPressHandler.removeCallbacks(longPressRunnable)
+                    }
                     params.x = startX + dx
                     params.y = startY + dy
                     windowManager.updateViewLayout(view, params)
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (moved) {
+                    longPressHandler.removeCallbacks(longPressRunnable)
+                    if (longPressFired) {
+                        // already handled by the long-press callback
+                    } else if (moved) {
                         BubblePrefs.savePosition(this@OverlayService, params.x, params.y)
                     } else {
                         onBubbleTapped()
@@ -378,7 +396,12 @@ class OverlayService : Service() {
                 }
             },
             onSpeak = { text -> ttsHelper.speak(text) },
-            onSaveVocab = { word, hanja, gloss, source -> saveVocabWord(word, hanja, gloss, source) }
+            onSaveVocab = { word, hanja, gloss, source -> saveVocabWord(word, hanja, gloss, source) },
+            onLookupCompleted = { word, translated, source, isSingleWord ->
+                sessionHistory.add(
+                    SessionHistoryEntry(word, translated, source, System.currentTimeMillis(), isSingleWord)
+                )
+            }
         )
 
         val params = WindowManager.LayoutParams(
@@ -449,6 +472,40 @@ class OverlayService : Service() {
         wordDetailView = null
     }
 
+    // --- Session history (long-press the bubble) --------------------------
+
+    private fun showSessionHistory() {
+        removeSessionHistory()
+        serviceScope.launch {
+            val singleWords = sessionHistory.filter { it.isSingleWord }.map { it.original }.toSet()
+            val canonicalByRaw = singleWords.associateWith { DictionaryManager.canonicalForm(it) }
+            val learnedMap = VocabManager.learnedStatus(this@OverlayService, canonicalByRaw.values.toSet())
+            val learnedByWord = canonicalByRaw.mapValues { (_, canonical) -> learnedMap[canonical] == true }
+
+            val view = SessionHistoryView(
+                this@OverlayService,
+                entries = sessionHistory.toList(),
+                learnedByWord = learnedByWord,
+                onDismiss = { removeSessionHistory() }
+            )
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            )
+            windowManager.addView(view, params)
+            view.requestFocus()
+            sessionHistoryView = view
+        }
+    }
+
+    private fun removeSessionHistory() {
+        sessionHistoryView?.let { runCatching { windowManager.removeView(it) } }
+        sessionHistoryView = null
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -457,6 +514,7 @@ class OverlayService : Service() {
             BubblePrefs.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
         }
         removeCaptureOverlay()
+        removeSessionHistory()
         bubbleView?.let { runCatching { windowManager.removeView(it) } }
         bubbleView = null
         ocrHelper.close()

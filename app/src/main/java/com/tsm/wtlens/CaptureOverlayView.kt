@@ -42,7 +42,8 @@ class CaptureOverlayView(
     private val onCloseRequested: () -> Unit,
     private val onDefinitionTapped: (WordLookupDetail) -> Unit,
     private val onSpeak: (String) -> Unit,
-    private val onSaveVocab: (word: String, hanja: String?, gloss: String, source: String) -> Unit
+    private val onSaveVocab: (word: String, hanja: String?, gloss: String, source: String) -> Unit,
+    private val onLookupCompleted: (word: String, translated: String, source: String, isSingleWord: Boolean) -> Unit
 ) : View(context) {
 
     private data class Selection(
@@ -479,6 +480,7 @@ class CaptureOverlayView(
                 )
                 invalidate()
             }
+            onLookupCompleted(text, result, source, isSingleWord)
         }
     }
 
