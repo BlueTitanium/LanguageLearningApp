@@ -37,6 +37,7 @@ object VocabManager {
     private const val DB_NAME = "vocab.db"
     private const val PREFS_NAME = "vocab_prefs"
     private const val KEY_GRADUATION_DAYS = "graduation_days"
+    private const val KEY_ENABLED = "vocab_saving_enabled"
     const val DEFAULT_GRADUATION_DAYS = 21
     private const val MIN_EASE = 1.3
 
@@ -44,6 +45,19 @@ object VocabManager {
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /**
+     * Master on/off switch for the whole feature: when off, lookups aren't
+     * auto-saved and on-screen words skip the highlighting DB query
+     * entirely, to keep things lightweight for anyone who doesn't want it.
+     * Previously-saved words and review/browse screens still work either
+     * way - this only gates new saves and the per-capture status lookup.
+     */
+    fun isEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, true)
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+    }
 
     fun graduationDays(context: Context): Int =
         prefs(context).getInt(KEY_GRADUATION_DAYS, DEFAULT_GRADUATION_DAYS)

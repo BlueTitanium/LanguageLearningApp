@@ -311,6 +311,7 @@ class OverlayService : Service() {
      * on-screen highlighting.
      */
     private suspend fun computeWordVocabStatus(words: List<OcrHit>): Map<String, WordVocabStatus> {
+        if (!VocabManager.isEnabled(this)) return emptyMap()
         val canonicalByRaw = words.associate { it.text to DictionaryManager.canonicalForm(it.text) }
         val learnedMap = VocabManager.learnedStatus(this, canonicalByRaw.values.toSet())
         return canonicalByRaw.mapValues { (_, canonical) ->
@@ -423,7 +424,7 @@ class OverlayService : Service() {
                 )
                 // Single-word lookups auto-save to vocab (no manual button anymore) -
                 // VocabManager.save is a no-op if this canonical form is already saved.
-                if (isSingleWord) {
+                if (isSingleWord && VocabManager.isEnabled(this@OverlayService)) {
                     saveVocabWord(word, dictEntries, translated, source)
                 }
             },

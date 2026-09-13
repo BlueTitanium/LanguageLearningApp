@@ -62,28 +62,145 @@ class MainActivity : AppCompatActivity() {
     private lateinit var onlineStatusText: TextView
     private lateinit var onlineTestButton: Button
 
+    private lateinit var vocabEnabledSwitch: Switch
     private lateinit var vocabStatsText: TextView
     private lateinit var vocabGraduationText: TextView
     private lateinit var vocabReviewButton: Button
 
+    private lateinit var homeTabLabel: TextView
+    private lateinit var vocabTabLabel: TextView
+    private lateinit var settingsTabLabel: TextView
+    private lateinit var homeScroll: android.widget.ScrollView
+    private lateinit var vocabScroll: android.widget.ScrollView
+    private lateinit var settingsScroll: android.widget.ScrollView
+
+    private enum class Tab { HOME, VOCAB, SETTINGS }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val root = LinearLayout(this).apply {
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+
+        val outer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 96, 48, 48)
+            setBackgroundColor(Color.parseColor("#0F0F10"))
         }
 
-        statusText = TextView(this)
-        root.addView(statusText)
+        outer.addView(TextView(this).apply {
+            text = "WebtoonLens"
+            textSize = 22f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(UiStyle.TEXT_PRIMARY)
+            setPadding(dp(20), dp(28), dp(20), dp(14))
+        })
+
+        // --- Tab bar ---
+        homeTabLabel = TextView(this).apply {
+            text = "Home"
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        vocabTabLabel = TextView(this).apply {
+            text = "Vocab"
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        settingsTabLabel = TextView(this).apply {
+            text = "Settings"
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(homeTabLabel)
+            addView(vocabTabLabel)
+            addView(settingsTabLabel)
+        }
+        outer.addView(tabBar)
+        outer.addView(UiStyle.divider(this))
+
+        val homePage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+        val vocabContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(24))
+        }
+        val settingsContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(16), dp(12), dp(24))
+        }
+        homeScroll = android.widget.ScrollView(this).apply { addView(homePage) }
+        vocabScroll = android.widget.ScrollView(this).apply { addView(vocabContent) }
+        settingsScroll = android.widget.ScrollView(this).apply { addView(settingsContent) }
+
+        val pages = android.widget.FrameLayout(this).apply {
+            addView(homeScroll)
+            addView(vocabScroll)
+            addView(settingsScroll)
+        }
+        outer.addView(
+            pages,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+
+        homeTabLabel.setOnClickListener { selectTab(Tab.HOME) }
+        vocabTabLabel.setOnClickListener { selectTab(Tab.VOCAB) }
+        settingsTabLabel.setOnClickListener { selectTab(Tab.SETTINGS) }
+
+        // --- Home page: the primary reading-session actions ---
+        statusText = TextView(this).apply {
+            setTextColor(UiStyle.TEXT_SECONDARY)
+            textSize = 14f
+            setPadding(0, 0, 0, dp(16))
+        }
+        homePage.addView(statusText)
 
         val grantOverlayButton = Button(this).apply {
             text = "1. Grant overlay permission"
             setOnClickListener { requestOverlayPermission() }
         }
-        root.addView(grantOverlayButton)
+        UiStyle.styleAsChipButton(grantOverlayButton, this)
+        homePage.addView(
+            grantOverlayButton,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(20) }
+        )
 
-        val visuals = addCollapsible(root, "Visuals", initiallyExpanded = true)
+        val startButton = Button(this).apply {
+            text = "2. Start WebtoonLens bubble"
+            textSize = 16f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            isAllCaps = false
+        }
+        startButton.background = GradientDrawable().apply {
+            setColor(Color.parseColor("#2A6DB0"))
+            cornerRadius = 28f * density
+        }
+        startButton.setPadding(dp(24), dp(16), dp(24), dp(16))
+        startButton.setOnClickListener { startOverlay() }
+        homePage.addView(
+            startButton,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        // --- Settings page: everything else, grouped into collapsible cards ---
+        val visuals = addCollapsible(settingsContent, "Visuals", initiallyExpanded = true)
 
         // --- Size ---
         sizeValueText = TextView(this)
@@ -152,7 +269,7 @@ class MainActivity : AppCompatActivity() {
         visuals.addView(resetPositionButton)
 
         // --- Dictionary (offline + online) ---
-        val dictionaryCategory = addCollapsible(root, "Dictionary", initiallyExpanded = false)
+        val dictionaryCategory = addCollapsible(settingsContent, "Dictionary", initiallyExpanded = false)
 
         val offline = addCollapsible(
             dictionaryCategory, "Offline dictionary", indentDp = 16, initiallyExpanded = false
@@ -200,16 +317,10 @@ class MainActivity : AppCompatActivity() {
         )
         buildOnlineTranslationSection(online)
 
-        val vocabCategory = addCollapsible(root, "Vocabulary", initiallyExpanded = false)
-        buildVocabularySection(vocabCategory)
+        buildVocabularySection(vocabContent)
 
-        val startButton = Button(this).apply {
-            text = "2. Start WebtoonLens bubble"
-            setOnClickListener { startOverlay() }
-        }
-        root.addView(startButton)
-
-        setContentView(android.widget.ScrollView(this).apply { addView(root) })
+        setContentView(outer)
+        selectTab(Tab.HOME)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ActivityCompat.requestPermissions(
@@ -218,6 +329,15 @@ class MainActivity : AppCompatActivity() {
                 REQUEST_NOTIFICATIONS
             )
         }
+    }
+
+    private fun selectTab(tab: Tab) {
+        homeScroll.visibility = if (tab == Tab.HOME) android.view.View.VISIBLE else android.view.View.GONE
+        vocabScroll.visibility = if (tab == Tab.VOCAB) android.view.View.VISIBLE else android.view.View.GONE
+        settingsScroll.visibility = if (tab == Tab.SETTINGS) android.view.View.VISIBLE else android.view.View.GONE
+        homeTabLabel.setTextColor(if (tab == Tab.HOME) UiStyle.ACCENT else UiStyle.TEXT_MUTED)
+        vocabTabLabel.setTextColor(if (tab == Tab.VOCAB) UiStyle.ACCENT else UiStyle.TEXT_MUTED)
+        settingsTabLabel.setTextColor(if (tab == Tab.SETTINGS) UiStyle.ACCENT else UiStyle.TEXT_MUTED)
     }
 
     override fun onResume() {
@@ -489,11 +609,23 @@ class MainActivity : AppCompatActivity() {
     private fun buildVocabularySection(container: LinearLayout) {
         container.addView(TextView(this).apply {
             text = "Every single word you look up while reading is saved here automatically " +
-                "for spaced-repetition review, Anki-style. Not-yet-learned words are " +
-                "highlighted blue while reading; once graduated they turn grey (still " +
-                "tappable, just de-emphasized)."
+                "for spaced-repetition review, Anki-style. Not-yet-saved words are highlighted " +
+                "blue, saved-but-still-reviewing words purple, and learned/graduated words " +
+                "grey (still tappable, just de-emphasized). Turn this off to keep the app " +
+                "lighter-weight if you don't want it — previously saved words and review " +
+                "still work either way, this just stops new auto-saving and the per-word " +
+                "highlighting lookup."
             setPadding(0, 0, 0, 8)
         })
+
+        vocabEnabledSwitch = Switch(this).apply {
+            text = "Enable vocabulary saving"
+            isChecked = VocabManager.isEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, isChecked ->
+                VocabManager.setEnabled(this@MainActivity, isChecked)
+            }
+        }
+        container.addView(vocabEnabledSwitch)
 
         vocabStatsText = TextView(this)
         container.addView(vocabStatsText)
@@ -539,6 +671,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshVocabUi() {
+        vocabEnabledSwitch.setOnCheckedChangeListener(null)
+        vocabEnabledSwitch.isChecked = VocabManager.isEnabled(this)
+        vocabEnabledSwitch.setOnCheckedChangeListener { _, isChecked ->
+            VocabManager.setEnabled(this@MainActivity, isChecked)
+        }
+
         activityScope.launch {
             val (total, learned, due) = VocabManager.stats(this@MainActivity)
             vocabStatsText.text = "$total saved · $learned learned · $due due for review"
@@ -557,22 +695,27 @@ class MainActivity : AppCompatActivity() {
         initiallyExpanded: Boolean = false
     ): LinearLayout {
         val density = resources.displayMetrics.density
-        val indentPx = (indentDp * density).toInt()
+        fun dp(v: Int) = (v * density).toInt()
+        val isTopLevel = indentDp == 0
 
         val arrow = TextView(this).apply {
             text = if (initiallyExpanded) "▾" else "▸"
-            textSize = 16f
-            setPadding(0, 0, (12 * density).toInt(), 0)
+            textSize = 15f
+            setTextColor(if (isTopLevel) UiStyle.TEXT_PRIMARY else UiStyle.TEXT_SECONDARY)
+            setPadding(0, 0, dp(10), 0)
         }
         val titleView = TextView(this).apply {
             text = title
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            textSize = if (indentDp == 0) 16f else 14f
+            textSize = if (isTopLevel) 17f else 14f
+            setTextColor(if (isTopLevel) UiStyle.TEXT_PRIMARY else UiStyle.TEXT_SECONDARY)
         }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(indentPx, (24 * density).toInt(), 0, (16 * density).toInt())
+            val hPad = if (isTopLevel) dp(20) else dp(indentDp)
+            val vPad = if (isTopLevel) dp(18) else dp(14)
+            setPadding(hPad, vPad, dp(20), vPad)
             isClickable = true
             isFocusable = true
             addView(arrow)
@@ -582,7 +725,8 @@ class MainActivity : AppCompatActivity() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (initiallyExpanded) android.view.View.VISIBLE else android.view.View.GONE
-            setPadding(indentPx, 0, 0, 0)
+            val hPad = if (isTopLevel) dp(20) else dp(indentDp)
+            setPadding(hPad, 0, dp(20), if (isTopLevel) dp(18) else dp(10))
         }
 
         header.setOnClickListener {
@@ -591,8 +735,24 @@ class MainActivity : AppCompatActivity() {
             arrow.text = if (expanded) "▸" else "▾"
         }
 
-        parent.addView(header)
-        parent.addView(content)
+        if (isTopLevel) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = UiStyle.cardBackground(16f, density)
+                clipToOutline = true
+                addView(header)
+                addView(content)
+            }
+            parent.addView(
+                card,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(14) }
+            )
+        } else {
+            parent.addView(header)
+            parent.addView(content)
+        }
         return content
     }
 
