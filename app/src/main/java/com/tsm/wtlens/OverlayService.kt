@@ -38,6 +38,7 @@ class OverlayService : Service() {
     private var screenCapture: ScreenCapture? = null
     private val ocrHelper = OcrHelper()
     private val translationHelper = TranslationHelper()
+    private val ttsHelper by lazy { TtsHelper(this) }
 
     private var bubbleView: View? = null
     private var captureOverlayView: CaptureOverlayView? = null
@@ -352,7 +353,8 @@ class OverlayService : Service() {
                     }
                     showWordDetail(detail.copy(breakdown = breakdown, conjugationRoot = conjugationRoot))
                 }
-            }
+            },
+            onSpeak = { text -> ttsHelper.speak(text) }
         )
 
         val params = WindowManager.LayoutParams(
@@ -400,7 +402,11 @@ class OverlayService : Service() {
 
     private fun showWordDetail(detail: WordLookupDetail) {
         removeWordDetail()
-        val view = WordDetailView(this, detail, onDismiss = { removeWordDetail() })
+        val view = WordDetailView(
+            this, detail,
+            onDismiss = { removeWordDetail() },
+            onSpeak = { text -> ttsHelper.speak(text) }
+        )
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -430,6 +436,7 @@ class OverlayService : Service() {
         bubbleView = null
         ocrHelper.close()
         translationHelper.close()
+        ttsHelper.shutdown()
         screenCapture?.release()
         screenCapture = null
         mediaProjection?.stop()

@@ -44,7 +44,8 @@ data class WordLookupDetail(
 class WordDetailView(
     context: Context,
     detail: WordLookupDetail,
-    private val onDismiss: () -> Unit
+    private val onDismiss: () -> Unit,
+    private val onSpeak: (String) -> Unit
 ) : FrameLayout(context) {
 
     init {
@@ -66,11 +67,23 @@ class WordDetailView(
             isClickable = true
         }
 
-        card.addView(TextView(context).apply {
-            text = detail.original
-            setTextColor(Color.WHITE)
-            textSize = 22f
-            setTypeface(typeface, Typeface.BOLD)
+        card.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(context).apply {
+                text = detail.original
+                setTextColor(Color.WHITE)
+                textSize = 22f
+                setTypeface(typeface, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                )
+            })
+            addView(Button(context).apply {
+                text = "🔊"
+                setPadding(dp(12), 0, dp(12), 0)
+                setOnClickListener { onSpeak(detail.original) }
+            })
         })
 
         if (detail.breakdown.isNotEmpty()) {

@@ -9,6 +9,9 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.TextUtils
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -36,7 +39,8 @@ class CaptureOverlayView(
     private val contextAwareEnabled: Boolean,
     private val scope: CoroutineScope,
     private val onCloseRequested: () -> Unit,
-    private val onDefinitionTapped: (WordLookupDetail) -> Unit
+    private val onDefinitionTapped: (WordLookupDetail) -> Unit,
+    private val onSpeak: (String) -> Unit
 ) : View(context) {
 
     private data class Selection(
@@ -93,12 +97,12 @@ class CaptureOverlayView(
         color = Color.argb(235, 20, 20, 20)
         style = Paint.Style.FILL
     }
-    private val popupOriginalPaint = Paint().apply {
+    private val popupOriginalPaint = TextPaint().apply {
         color = Color.argb(200, 255, 255, 255)
         textSize = 34f
         isAntiAlias = true
     }
-    private val popupTranslatedPaint = Paint().apply {
+    private val popupTranslatedPaint = TextPaint().apply {
         color = Color.WHITE
         textSize = 40f
         isAntiAlias = true
@@ -108,9 +112,21 @@ class CaptureOverlayView(
         textSize = 24f
         isAntiAlias = true
     }
+    private val speakerIconBgPaint = Paint().apply {
+        color = Color.argb(255, 60, 60, 65)
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val speakerIconTextPaint = Paint().apply {
+        color = Color.WHITE
+        textSize = 28f
+        isAntiAlias = true
+        textAlign = Paint.Align.CENTER
+    }
 
     private val closeButtonRect = RectF()
     private var lastPopupBox: RectF? = null
+    private var speakerIconRect: RectF? = null
 
     // --- Drag/lasso tracking --------------------------------------------
     private var dragPath: Path? = null
@@ -165,35 +181,89 @@ class CaptureOverlayView(
             drawPopup(canvas, sel)
         } else {
             lastPopupBox = null
+            speakerIconRect = null
         }
+    }
+
+    private fun buildLayout(text: String, paint: TextPaint, maxWidth: Int, maxLines: Int): StaticLayout {
+        val safeWidth = maxWidth.coerceAtLeast(1)
+        return StaticLayout.Builder.obtain(text, 0, text.length, paint, safeWidth)
+            .setMaxLines(maxLines)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .build()
+    }
+
+    private fun maxLineWidth(layout: StaticLayout): Float {
+        var max = 0f
+        for (i in 0 until layout.lineCount) max = maxOf(max, layout.getLineWidth(i))
+        return max
+    }
+
+    /** Draws [text] with its top-left at ([x], [topY]) rather than baseline-aligned. */
+    private fun drawTextTopAligned(canvas: Canvas, text: String, x: Float, topY: Float, paint: Paint) {
+        canvas.drawText(text, x, topY - paint.fontMetrics.top, paint)
     }
 
     private fun drawPopup(canvas: Canvas, sel: Selection) {
         val paddingH = 32f
         val paddingV = 24f
+        val gap = 12f
+        val speakerSize = 56f
+        val speakerReserve = speakerSize + 16f
+
         val original = sel.text
         val translated = if (sel.loading) "Translating…" else (sel.translated ?: "")
         val sourceLabel = sel.source?.takeIf { !sel.loading }?.let { "$it · tap for more" }
 
-        val originalWidth = popupOriginalPaint.measureText(original)
-        val translatedWidth = popupTranslatedPaint.measureText(translated)
-        val boxWidth = (maxOf(originalWidth, translatedWidth) + paddingH * 2)
-            .coerceAtMost(width - 40f)
-        val boxHeight = if (sourceLabel != null) 160f else 130f
+        val maxBoxWidth = width - 40f
+        val maxTextWidth = (maxBoxWidth - paddingH * 2 - speakerReserve).toInt()
+
+        val originalLayout = buildLayout(original, popupOriginalPaint, maxTextWidth, maxLines = 3)
+        val translatedLayout = buildLayout(translated, popupTranslatedPaint, maxTextWidth, maxLines = 8)
+
+        val sourceWidth = sourceLabel?.let { popupSourcePaint.measureText(it) } ?: 0f
+        val neededContentWidth = maxOf(
+            maxLineWidth(originalLayout), maxLineWidth(translatedLayout), sourceWidth
+        )
+        val boxWidth = (neededContentWidth + paddingH * 2 + speakerReserve)
+            .coerceAtMost(maxBoxWidth)
+            .coerceAtLeast(160f)
+
+        var contentHeight = originalLayout.height.toFloat() + gap + translatedLayout.height.toFloat()
+        val sourceLineHeight = popupSourcePaint.let { it.fontMetrics.descent - it.fontMetrics.ascent }
+        if (sourceLabel != null) contentHeight += gap + sourceLineHeight
+        val boxHeight = (contentHeight + paddingV * 2).coerceAtLeast(speakerReserve + paddingV)
 
         var left = sel.anchor.centerX() - boxWidth / 2
-        left = left.coerceIn(20f, width - boxWidth - 20f)
+        left = left.coerceIn(20f, (width - boxWidth - 20f).coerceAtLeast(20f))
 
         var top = sel.anchor.top - boxHeight - 16f
         if (top < 20f) top = sel.anchor.bottom + 16f
 
         val box = RectF(left, top, left + boxWidth, top + boxHeight)
         canvas.drawRoundRect(box, 24f, 24f, popupBgPaint)
-        canvas.drawText(original, box.left + paddingH, box.top + paddingV + 30f, popupOriginalPaint)
-        canvas.drawText(translated, box.left + paddingH, box.top + paddingV + 78f, popupTranslatedPaint)
+
+        canvas.save()
+        canvas.translate(box.left + paddingH, box.top + paddingV)
+        originalLayout.draw(canvas)
+        canvas.translate(0f, originalLayout.height + gap)
+        translatedLayout.draw(canvas)
+        canvas.restore()
+
         if (sourceLabel != null) {
-            canvas.drawText(sourceLabel, box.left + paddingH, box.top + paddingV + 112f, popupSourcePaint)
+            val sourceTopY = box.top + paddingV + originalLayout.height + gap + translatedLayout.height + gap
+            drawTextTopAligned(canvas, sourceLabel, box.left + paddingH, sourceTopY, popupSourcePaint)
         }
+
+        val speakerRect = RectF(
+            box.right - speakerSize - 12f, box.top + 12f,
+            box.right - 12f, box.top + 12f + speakerSize
+        )
+        canvas.drawRoundRect(speakerRect, 14f, 14f, speakerIconBgPaint)
+        canvas.drawText(
+            "🔊", speakerRect.centerX(), speakerRect.centerY() + 10f, speakerIconTextPaint
+        )
+        speakerIconRect = speakerRect
 
         // Only tappable-for-detail once it's done loading (nothing to expand into yet otherwise).
         lastPopupBox = if (!sel.loading) box else null
@@ -238,6 +308,12 @@ class CaptureOverlayView(
         }
 
         val sel = selection
+        val speakerRect = speakerIconRect
+        if (sel != null && speakerRect != null && speakerRect.contains(x, y)) {
+            onSpeak(sel.text)
+            return
+        }
+
         val popupBox = lastPopupBox
         if (sel != null && popupBox != null && popupBox.contains(x, y)) {
             onDefinitionTapped(
