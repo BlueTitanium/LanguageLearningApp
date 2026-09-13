@@ -204,6 +204,22 @@ object DictionaryManager {
         '(', ')', '[', ']', '~', ' ', '　'
     )
 
+    /**
+     * The single best-guess canonical/base form of [word] - the
+     * punctuation-trimmed text, or its KOMORAN dictionary root if it's a
+     * conjugated single-word predicate. Used to key vocabulary entries and
+     * word-highlighting so conjugated forms of the same word are treated as
+     * the same vocab item. Pure text/morphology, no dictionary DB needed.
+     */
+    suspend fun canonicalForm(word: String): String {
+        val cleaned = word.trim(*TRIM_CHARS)
+        if (cleaned.isEmpty()) return word
+        if (!cleaned.contains(' ')) {
+            KoreanMorphAnalyzer.findPredicateRoot(cleaned)?.let { return it }
+        }
+        return cleaned
+    }
+
     suspend fun lookup(context: Context, word: String): List<DictionaryEntry> =
         withContext(Dispatchers.IO) {
             val cleaned = word.trim(*TRIM_CHARS)
