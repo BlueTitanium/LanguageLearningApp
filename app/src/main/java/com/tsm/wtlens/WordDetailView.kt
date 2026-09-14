@@ -122,6 +122,32 @@ class WordDetailView(
             card.addView(spacer(dp(14)))
         }
 
+        // The dictionary was looked up in the background alongside an online/
+        // on-device translation (e.g. DeepL context-aware mode) rather than
+        // being the source of [fallbackTranslation] - show both instead of
+        // silently dropping the dictionary senses.
+        val entriesAreThePrimarySource = detail.sourceLabel == "Dictionary"
+        if (detail.entries.isNotEmpty() && !entriesAreThePrimarySource) {
+            card.addView(TextView(context).apply {
+                text = detail.fallbackTranslation
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                setPadding(0, dp(14), 0, dp(6))
+            })
+            card.addView(TextView(context).apply {
+                text = "via ${detail.sourceLabel}"
+                setTextColor(Color.argb(180, 255, 255, 255))
+                textSize = 12f
+                setPadding(0, 0, 0, dp(12))
+            })
+            card.addView(TextView(context).apply {
+                text = "Dictionary"
+                setTextColor(Color.argb(220, 130, 200, 255))
+                textSize = 13f
+                setPadding(0, 0, 0, dp(6))
+            })
+        }
+
         if (detail.entries.isNotEmpty()) {
             detail.entries.take(10).forEachIndexed { index, entry ->
                 card.addView(TextView(context).apply {

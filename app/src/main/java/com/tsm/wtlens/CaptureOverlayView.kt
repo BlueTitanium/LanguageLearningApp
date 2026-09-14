@@ -457,6 +457,11 @@ class CaptureOverlayView(
                 if (online != null) {
                     result = online.first
                     source = online.second
+                    // Online result wins for the headline translation, but still
+                    // look up the offline dictionary so its (context-free) senses
+                    // are available too - shown alongside the online translation
+                    // in the expanded detail view instead of being discarded.
+                    tryDictionary()
                 } else if (tryDictionary()) {
                     result = DictionaryManager.formatEntries(dictEntries)
                     source = "Dictionary"
