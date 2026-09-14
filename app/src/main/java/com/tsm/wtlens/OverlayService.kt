@@ -422,6 +422,9 @@ class OverlayService : Service() {
                 sessionHistory.add(
                     SessionHistoryEntry(word, translated, source, System.currentTimeMillis(), isSingleWord)
                 )
+                if (isSingleWord && TtsHelper.isAutoplayEnabled(this@OverlayService)) {
+                    ttsHelper.speak(word)
+                }
                 // Single-word lookups auto-save to vocab (no manual button anymore) -
                 // VocabManager.save is a no-op if this canonical form is already saved.
                 if (isSingleWord && VocabManager.isEnabled(this@OverlayService)) {

@@ -268,6 +268,14 @@ class MainActivity : AppCompatActivity() {
         }
         visuals.addView(resetPositionButton)
 
+        visuals.addView(Switch(this).apply {
+            text = "Auto-play pronunciation on tap"
+            isChecked = TtsHelper.isAutoplayEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, isChecked ->
+                TtsHelper.setAutoplayEnabled(this@MainActivity, isChecked)
+            }
+        })
+
         // --- Dictionary (offline + online) ---
         val dictionaryCategory = addCollapsible(settingsContent, "Dictionary", initiallyExpanded = false)
 

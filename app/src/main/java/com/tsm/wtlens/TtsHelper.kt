@@ -47,5 +47,17 @@ class TtsHelper(context: Context) {
 
     companion object {
         private const val TAG = "WebtoonLensTts"
+        private const val PREFS_NAME = "tts_prefs"
+        private const val KEY_AUTOPLAY = "autoplay_enabled"
+
+        /** When on, tapping a single word speaks it aloud automatically. */
+        fun isAutoplayEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_AUTOPLAY, false)
+
+        fun setAutoplayEnabled(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_AUTOPLAY, enabled).apply()
+        }
     }
 }
